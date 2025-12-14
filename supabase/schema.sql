@@ -189,111 +189,320 @@ create table if not exists public.profile_contributions (
   created_at timestamptz default now()
 );
 
--- RLS e políticas temporárias (liberadas) para desenvolvimento
+-- Ligações de usuários autenticados com tenants e perfis
+create table if not exists public.user_roles (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  tenant_id uuid not null references public.tenants(id) on delete cascade,
+  role text not null check (role in ('super_admin', 'tenant_admin', 'associado')),
+  created_at timestamptz default now(),
+  unique (user_id, tenant_id)
+);
+
+alter table public.profiles
+  add column if not exists user_id uuid references auth.users(id) on delete set null;
+
+alter table public.profiles
+  add column if not exists role text check (role in ('super_admin', 'tenant_admin', 'associado'));
+
+alter table public.tenants
+  add column if not exists created_by uuid references auth.users(id);
+
+-- Helpers de RLS
+create or replace function public.is_super_admin()
+returns boolean
+language sql
+stable
+as $$
+  select exists (
+    select 1
+    from public.user_roles ur
+    where ur.user_id = auth.uid()
+      and ur.role = 'super_admin'
+  );
+$$;
+
+create or replace function public.is_tenant_admin(target_tenant uuid)
+returns boolean
+language sql
+stable
+as $$
+  select exists (
+    select 1
+    from public.user_roles ur
+    where ur.user_id = auth.uid()
+      and ur.role in ('super_admin','tenant_admin')
+      and ur.tenant_id = target_tenant
+  );
+$$;
+
+create or replace function public.is_profile_owner(target_profile uuid)
+returns boolean
+language sql
+stable
+as $$
+  select exists (
+    select 1
+    from public.profiles p
+    where p.id = target_profile
+      and p.user_id = auth.uid()
+    );
+$$;
+
+create or replace function public.storage_path_segments(object_name text)
+returns text[]
+language sql
+immutable
+as $$
+  select string_to_array(coalesce(object_name, ''), '/');
+$$;
+
+create or replace function public.safe_uuid(value text)
+returns uuid
+language plpgsql
+immutable
+as $$
+declare
+  result uuid;
+begin
+  begin
+    result := value::uuid;
+  exception when others then
+    result := null;
+  end;
+  return result;
+end;
+$$;
+
+-- Políticas RLS para user_roles (somente service_role e super admins)
+alter table public.user_roles enable row level security;
+drop policy if exists "Service role manages user_roles" on public.user_roles;
+create policy "Service role manages user_roles"
+  on public.user_roles
+  for all
+  using (auth.role() = 'service_role')
+  with check (auth.role() = 'service_role');
+
+drop policy if exists "Super admin manages user_roles" on public.user_roles;
+create policy "Super admin manages user_roles"
+  on public.user_roles
+  for all
+  using (public.is_super_admin())
+  with check (public.is_super_admin());
+
+-- Políticas RLS para perfis e entidades relacionadas
 alter table public.profiles enable row level security;
-drop policy if exists "Allow public manage profiles" on public.profiles;
-create policy "Allow public manage profiles"
+drop policy if exists "Super admin access profiles" on public.profiles;
+create policy "Super admin access profiles"
   on public.profiles
   for all
-  to anon
-  using (true)
-  with check (true);
+  using (public.is_super_admin())
+  with check (public.is_super_admin());
+
+drop policy if exists "Tenant admin access profiles" on public.profiles;
+create policy "Tenant admin access profiles"
+  on public.profiles
+  for all
+  using (public.is_tenant_admin(tenant_id))
+  with check (public.is_tenant_admin(tenant_id));
+
+drop policy if exists "Associado manages own profile" on public.profiles;
+create policy "Associado manages own profile"
+  on public.profiles
+  for all
+  using (public.is_profile_owner(id))
+  with check (public.is_profile_owner(id));
+
+-- privilegio de service_role para integrações
+drop policy if exists "Service role access profiles" on public.profiles;
+create policy "Service role access profiles"
+  on public.profiles
+  for all
+  using (auth.role() = 'service_role')
+  with check (auth.role() = 'service_role');
+
+-- Políticas comuns para tabelas derivadas de profiles
+create or replace function public.can_manage_profile_child(child_profile_id uuid)
+returns boolean
+language sql
+stable
+as $$
+  select
+    public.is_super_admin()
+    or exists (
+      select 1
+      from public.profiles p
+      where p.id = child_profile_id
+        and (
+          public.is_tenant_admin(p.tenant_id)
+          or public.is_profile_owner(p.id)
+        )
+    );
+$$;
+
+\echo 'Configuring RLS for profile child tables...'
 
 alter table public.profile_addresses enable row level security;
-drop policy if exists "Allow public manage profile_addresses" on public.profile_addresses;
-create policy "Allow public manage profile_addresses"
+drop policy if exists "Manage profile_addresses" on public.profile_addresses;
+create policy "Manage profile_addresses"
   on public.profile_addresses
   for all
-  to anon
-  using (true)
-  with check (true);
+  using (public.can_manage_profile_child(profile_id))
+  with check (public.can_manage_profile_child(profile_id));
 
 alter table public.profile_contacts enable row level security;
-drop policy if exists "Allow public manage profile_contacts" on public.profile_contacts;
-create policy "Allow public manage profile_contacts"
+drop policy if exists "Manage profile_contacts" on public.profile_contacts;
+create policy "Manage profile_contacts"
   on public.profile_contacts
   for all
-  to anon
-  using (true)
-  with check (true);
+  using (public.can_manage_profile_child(profile_id))
+  with check (public.can_manage_profile_child(profile_id));
 
 alter table public.profile_education enable row level security;
-drop policy if exists "Allow public manage profile_education" on public.profile_education;
-create policy "Allow public manage profile_education"
+drop policy if exists "Manage profile_education" on public.profile_education;
+create policy "Manage profile_education"
   on public.profile_education
   for all
-  to anon
-  using (true)
-  with check (true);
+  using (public.can_manage_profile_child(profile_id))
+  with check (public.can_manage_profile_child(profile_id));
 
 alter table public.profile_specialties enable row level security;
-drop policy if exists "Allow public manage profile_specialties" on public.profile_specialties;
-create policy "Allow public manage profile_specialties"
+drop policy if exists "Manage profile_specialties" on public.profile_specialties;
+create policy "Manage profile_specialties"
   on public.profile_specialties
   for all
-  to anon
-  using (true)
-  with check (true);
+  using (public.can_manage_profile_child(profile_id))
+  with check (public.can_manage_profile_child(profile_id));
 
 alter table public.profile_roles enable row level security;
-drop policy if exists "Allow public manage profile_roles" on public.profile_roles;
-create policy "Allow public manage profile_roles"
+drop policy if exists "Manage profile_roles" on public.profile_roles;
+create policy "Manage profile_roles"
   on public.profile_roles
   for all
-  to anon
-  using (true)
-  with check (true);
+  using (public.can_manage_profile_child(profile_id))
+  with check (public.can_manage_profile_child(profile_id));
 
 alter table public.profile_titularities enable row level security;
-drop policy if exists "Allow public manage profile_titularities" on public.profile_titularities;
-create policy "Allow public manage profile_titularities"
+drop policy if exists "Manage profile_titularities" on public.profile_titularities;
+create policy "Manage profile_titularities"
   on public.profile_titularities
   for all
-  to anon
-  using (true)
-  with check (true);
+  using (public.can_manage_profile_child(profile_id))
+  with check (public.can_manage_profile_child(profile_id));
 
 alter table public.profile_practices enable row level security;
-drop policy if exists "Allow public manage profile_practices" on public.profile_practices;
-create policy "Allow public manage profile_practices"
+drop policy if exists "Manage profile_practices" on public.profile_practices;
+create policy "Manage profile_practices"
   on public.profile_practices
   for all
-  to anon
-  using (true)
-  with check (true);
+  using (public.can_manage_profile_child(profile_id))
+  with check (public.can_manage_profile_child(profile_id));
 
 alter table public.profile_contributions enable row level security;
-drop policy if exists "Allow public manage profile_contributions" on public.profile_contributions;
-create policy "Allow public manage profile_contributions"
+drop policy if exists "Manage profile_contributions" on public.profile_contributions;
+create policy "Manage profile_contributions"
   on public.profile_contributions
   for all
-  to anon
-  using (true)
-  with check (true);
+  using (public.can_manage_profile_child(profile_id))
+  with check (public.can_manage_profile_child(profile_id));
 
--- Garantir bucket de avatares e policies
+-- Garantir bucket de avatares e policies baseadas em roles
 insert into storage.buckets (id, name, public)
 select 'profile-photos', 'profile-photos', true
 where not exists (select 1 from storage.buckets where id = 'profile-photos');
 
 drop policy if exists "Allow authenticated upload avatars" on storage.objects;
-create policy "Allow authenticated upload avatars"
-  on storage.objects for insert
-  to anon
-  with check (bucket_id = 'profile-photos');
-
 drop policy if exists "Allow authenticated update avatars" on storage.objects;
-create policy "Allow authenticated update avatars"
-  on storage.objects for update
-  to anon
-  using (bucket_id = 'profile-photos')
-  with check (bucket_id = 'profile-photos');
-
 drop policy if exists "Allow authenticated delete avatars" on storage.objects;
-create policy "Allow authenticated delete avatars"
-  on storage.objects for delete
-  to anon
+
+create policy "Public can read avatars"
+  on storage.objects
+  for select
   using (bucket_id = 'profile-photos');
+
+create policy "Upload avatars with role"
+  on storage.objects
+  for insert
+  with check (
+    bucket_id = 'profile-photos'
+    and (
+      auth.role() = 'service_role'
+      or public.is_super_admin()
+      or (
+        array_length(public.storage_path_segments(name), 1) >= 2
+        and public.safe_uuid(public.storage_path_segments(name)[1]) in (
+          select tenant_id from public.user_roles
+          where user_id = auth.uid() and role = 'tenant_admin'
+        )
+      )
+      or (
+        array_length(public.storage_path_segments(name), 1) >= 2
+        and public.is_profile_owner(public.safe_uuid(public.storage_path_segments(name)[2]))
+      )
+    )
+  );
+
+create policy "Update avatars with role"
+  on storage.objects
+  for update
+  using (
+    bucket_id = 'profile-photos'
+    and (
+      auth.role() = 'service_role'
+      or public.is_super_admin()
+      or (
+        array_length(public.storage_path_segments(name), 1) >= 2
+        and public.safe_uuid(public.storage_path_segments(name)[1]) in (
+          select tenant_id from public.user_roles
+          where user_id = auth.uid() and role = 'tenant_admin'
+        )
+      )
+      or (
+        array_length(public.storage_path_segments(name), 1) >= 2
+        and public.is_profile_owner(public.safe_uuid(public.storage_path_segments(name)[2]))
+      )
+    )
+  )
+  with check (
+    bucket_id = 'profile-photos'
+    and (
+      auth.role() = 'service_role'
+      or public.is_super_admin()
+      or (
+        array_length(public.storage_path_segments(name), 1) >= 2
+        and public.safe_uuid(public.storage_path_segments(name)[1]) in (
+          select tenant_id from public.user_roles
+          where user_id = auth.uid() and role = 'tenant_admin'
+        )
+      )
+      or (
+        array_length(public.storage_path_segments(name), 1) >= 2
+        and public.is_profile_owner(public.safe_uuid(public.storage_path_segments(name)[2]))
+      )
+    )
+  );
+
+create policy "Delete avatars with role"
+  on storage.objects
+  for delete
+  using (
+    bucket_id = 'profile-photos'
+    and (
+      auth.role() = 'service_role'
+      or public.is_super_admin()
+      or (
+        array_length(public.storage_path_segments(name), 1) >= 2
+        and public.safe_uuid(public.storage_path_segments(name)[1]) in (
+          select tenant_id from public.user_roles
+          where user_id = auth.uid() and role = 'tenant_admin'
+        )
+      )
+      or (
+        array_length(public.storage_path_segments(name), 1) >= 2
+        and public.is_profile_owner(public.safe_uuid(public.storage_path_segments(name)[2]))
+      )
+    )
+  );
 
 insert into public.profiles
   (tenant_id, external_reference, full_name, preferred_name, email, document_id, council_number, council_state, nationality, gender, marital_status, birth_date, category, status, regional, membership_type, membership_started_at, membership_expires_at, association_status, avatar_url, notes)

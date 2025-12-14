@@ -36,16 +36,29 @@ const nationalityTypes = [
   { id: 'foreign', label: 'Estrangeiro' },
 ];
 
-export function UserFormPanel({ tenants, initialData, onSubmit, onCancel, isSaving, error }) {
+export function UserFormPanel({
+  tenants,
+  initialData,
+  onSubmit,
+  onCancel,
+  isSaving,
+  error,
+  lockedTenantId,
+  canEditTenant = true,
+  canEditRole = false,
+}) {
   const [activeTab, setActiveTab] = useState('personal');
-  const [formState, setFormState] = useState(() => createDefaultState(initialData, tenants));
+  const [formState, setFormState] = useState(() => createDefaultState(initialData, tenants, lockedTenantId));
   const [avatarError, setAvatarError] = useState(null);
 
   useEffect(() => {
-    setFormState(createDefaultState(initialData, tenants));
-  }, [initialData, tenants]);
+    setFormState(createDefaultState(initialData, tenants, lockedTenantId));
+  }, [initialData, tenants, lockedTenantId]);
 
   function handleFieldChange(field, value) {
+    if (field === 'tenantId' && !canEditTenant) {
+      return;
+    }
     setFormState((prev) => ({ ...prev, [field]: value }));
   }
 
@@ -111,7 +124,7 @@ export function UserFormPanel({ tenants, initialData, onSubmit, onCancel, isSavi
     reader.onload = () => {
       setAvatarError(null);
       handleFieldChange('avatarFile', file);
-      handleFieldChange('avatarUrl', reader.result);
+      handleFieldChange('avatarPreview', reader.result);
     };
     reader.readAsDataURL(file);
   }
@@ -148,6 +161,8 @@ export function UserFormPanel({ tenants, initialData, onSubmit, onCancel, isSavi
         handleForeignCountryChange,
         handleAvatarUpload,
         avatarError,
+        canEditTenant,
+        canEditRole,
       })}
       ${(error || avatarError) &&
       html`<p className="data-feedback data-feedback--error">${error ?? avatarError}</p>`}
@@ -173,6 +188,8 @@ function renderTabContent({
   handleNationalityTypeChange,
   handleForeignCountryChange,
   handleAvatarUpload,
+  canEditTenant,
+  canEditRole,
 }) {
   const tenantOptions = formState.tenantOptions ?? [];
   switch (activeTab) {
@@ -181,7 +198,11 @@ function renderTabContent({
         <form className="user-form__grid" onSubmit=${(e) => e.preventDefault()}>
           <label>
             <span>Tenant</span>
-            <select value=${formState.tenantId} onChange=${(event) => handleFieldChange('tenantId', event.target.value)}>
+            <select
+              value=${formState.tenantId}
+              onChange=${(event) => handleFieldChange('tenantId', event.target.value)}
+              disabled=${!canEditTenant}
+            >
               ${tenantOptions.map((tenant) =>
                 html`<option key=${tenant.id} value=${tenant.id}>${tenant.name}</option>`
               )}
@@ -266,6 +287,17 @@ function renderTabContent({
               ${membershipOptions.map((option) => html`<option key=${option.id} value=${option.id}>${option.label}</option>`)}
             </select>
           </label>
+          ${canEditRole &&
+          html`
+            <label>
+              <span>Nível de acesso</span>
+              <select value=${formState.role} onChange=${(event) => handleFieldChange('role', event.target.value)}>
+                <option value="associado">Associado</option>
+                <option value="tenant_admin">Tenant admin</option>
+                <option value="super_admin">Super admin</option>
+              </select>
+            </label>
+          `}
           <label>
             <span>Vigência inicial</span>
             <input
@@ -278,8 +310,12 @@ function renderTabContent({
             <span>Foto (quadrada)</span>
             <input type="file" accept="image/*" onChange=${handleAvatarUpload} />
             <small>Até 5 MB</small>
-            ${formState.avatarUrl &&
-            html`<div className="user-form__avatar-preview"><img src=${formState.avatarUrl} alt="Prévia do avatar" /></div>`}
+            ${(formState.avatarPreview || formState.avatarUrl) &&
+            html`
+              <div className="user-form__avatar-preview">
+                <img src=${formState.avatarPreview || formState.avatarUrl} alt="Prévia do avatar" />
+              </div>
+            `}
           </label>
         </form>
       `;
@@ -567,8 +603,8 @@ function renderTabContent({
   }
 }
 
-function createDefaultState(initialData, tenants) {
-  const tenantId = initialData?.tenantId ?? tenants[0]?.id ?? '';
+function createDefaultState(initialData, tenants, lockedTenantId) {
+  const tenantId = lockedTenantId ?? initialData?.tenantId ?? tenants[0]?.id ?? '';
   const initialNationality = initialData?.nationality ?? 'Brasileiro';
   const isBrazilian = !initialNationality || initialNationality.toLowerCase() === 'brasileiro';
   const normalizedMembership = initialData?.membershipType === 'student' ? 'student' : 'professional';
@@ -594,8 +630,11 @@ function createDefaultState(initialData, tenants) {
     membershipStartedAt: initialData?.membershipStartedAt ?? getSaoPauloTodayISO(),
     membershipExpiresAt: initialData?.membershipExpiresAt ?? '',
     avatarUrl: initialData?.avatarUrl ?? '',
+    avatarPreview: '',
     avatarFile: null,
     notes: initialData?.notes ?? '',
+    role: initialData?.role ?? 'associado',
+    userId: initialData?.userId ?? null,
     addresses: (initialData?.addresses ?? []).map((item) => ({ ...createAddressTemplate(), ...item })),
     contacts: (initialData?.contacts ?? []).map((item) => ({ ...createContactTemplate(), ...item })),
     education: (initialData?.education ?? []).map((item) => ({ ...createEducationTemplate(), ...item })),

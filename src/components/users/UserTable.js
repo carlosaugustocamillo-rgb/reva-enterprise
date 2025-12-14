@@ -6,7 +6,7 @@ const statusLabel = {
   inativo: 'Inativo',
 };
 
-export function UserTable({ profiles = [], onEdit }) {
+export function UserTable({ profiles = [], onEdit, canEditProfile }) {
   if (!profiles.length) {
     return html`<p className="user-panel__empty">Nenhum perfil encontrado.</p>`;
   }
@@ -44,9 +44,19 @@ export function UserTable({ profiles = [], onEdit }) {
                   </span>
                 </td>
                 <td>
-                  <button type="button" className="ghost-button" onClick=${() => onEdit?.(profile.id)}>
-                    Editar
-                  </button>
+                  ${(() => {
+                    const canEdit = canEditProfile ? canEditProfile(profile) : true;
+                    return html`
+                      <button
+                        type="button"
+                        className="ghost-button"
+                        onClick=${() => canEdit && onEdit?.(profile.id)}
+                        disabled=${!canEdit}
+                      >
+                        Editar
+                      </button>
+                    `;
+                  })()}
                 </td>
               </tr>
             `

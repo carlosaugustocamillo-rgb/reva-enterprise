@@ -12,6 +12,8 @@ export function UserDirectoryPanel({
   errorMessage,
   onCreate,
   onEdit,
+  canCreate = true,
+  canEditProfile,
 }) {
   return html`
     <section className="user-panel card">
@@ -27,12 +29,14 @@ export function UserDirectoryPanel({
             onQueryChange=${onQueryChange}
             onStatusChange=${onStatusChange}
           />
-          <button type="button" className="primary-button" onClick=${onCreate}>Novo perfil</button>
+          <button type="button" className="primary-button" onClick=${onCreate} disabled=${!canCreate}>
+            Novo perfil
+          </button>
         </div>
       </div>
       ${isSyncing && html`<p className="data-feedback">Sincronizando perfis...</p>`}
       ${errorMessage && html`<p className="data-feedback data-feedback--error">${errorMessage}</p>`}
-      <${UserTable} profiles=${profiles} onEdit=${onEdit} />
+      <${UserTable} profiles=${profiles} onEdit=${onEdit} canEditProfile=${canEditProfile} />
     </section>
   `;
 }

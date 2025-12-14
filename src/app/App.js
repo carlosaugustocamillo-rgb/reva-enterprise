@@ -15,6 +15,7 @@ import { TenantSummary } from '../components/TenantSummary.js';
 import { UserDirectoryPanel } from '../components/users/UserDirectoryPanel.js';
 import { ModuleWorkspaceNav } from '../components/ModuleWorkspaceNav.js';
 import { UserFormPanel } from '../components/users/UserFormPanel.js';
+import { LoginPanel } from '../components/auth/LoginPanel.js';
 import { getTenantModules, filterModules } from './moduleStatus.js';
 
 const fallbackTenant = {
@@ -31,6 +32,7 @@ const initialTenantId = seedTenants[0]?.id ?? fallbackTenant.id;
 const profileSelectFields = `
   id,
   tenant_id,
+  user_id,
   full_name,
   preferred_name,
   email,
@@ -50,6 +52,7 @@ const profileSelectFields = `
   association_status,
   avatar_url,
   notes,
+  role,
   profile_addresses(*),
   profile_contacts(*),
   profile_education(*),
@@ -107,9 +110,94 @@ export function App() {
   const [editingProfile, setEditingProfile] = useState(null);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [profileFormError, setProfileFormError] = useState(null);
+  const [session, setSession] = useState(null);
+  const [roleAssignments, setRoleAssignments] = useState([]);
+  const [authError, setAuthError] = useState(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(isSupabaseConfigured);
+  const [isSigningIn, setIsSigningIn] = useState(false);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !supabase) {
+      setIsAuthLoading(false);
+      return;
+    }
+
+    let mounted = true;
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) return;
+      setSession(data?.session ?? null);
+      setIsAuthLoading(false);
+    });
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      setSession(newSession);
+      setAuthError(null);
+    });
+
+    return () => {
+      mounted = false;
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) return;
+    if (!session?.user) {
+      setRoleAssignments([]);
+      return;
+    }
+
+    let active = true;
+    async function loadRoles() {
+      const { data, error } = await supabase
+        .from('user_roles')
+        .select('id, role, tenant_id, tenants:tenants(id, name, slug)')
+        .eq('user_id', session.user.id);
+      if (!active) return;
+      if (error) {
+        console.error('Falha ao buscar roles', error);
+        setAuthError('Não foi possível carregar permissões.');
+        setRoleAssignments([]);
+      } else {
+        setRoleAssignments(data ?? []);
+      }
+    }
+    loadRoles();
+
+    return () => {
+      active = false;
+    };
+  }, [session]);
+
+  const accessibleTenantIds = useMemo(() => {
+    if (!isSupabaseConfigured) {
+      return tenantCollection.map((tenant) => tenant.id);
+    }
+    if (!session?.user) {
+      return [];
+    }
+    const isSuperAdmin = roleAssignments.some((assignment) => assignment.role === 'super_admin');
+    if (isSuperAdmin) {
+      return tenantCollection.map((tenant) => tenant.id);
+    }
+    return roleAssignments.map((assignment) => assignment.tenant_id).filter(Boolean);
+  }, [isSupabaseConfigured, session, roleAssignments, tenantCollection]);
+
+  const isSuperAdmin = useMemo(
+    () => roleAssignments.some((assignment) => assignment.role === 'super_admin'),
+    [roleAssignments]
+  );
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !accessibleTenantIds.length) return;
+    if (!accessibleTenantIds.includes(selectedTenantId)) {
+      setSelectedTenantId(accessibleTenantIds[0]);
+    }
+  }, [isSupabaseConfigured, accessibleTenantIds, selectedTenantId]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !supabase || !session?.user) return;
 
     let isMounted = true;
 
@@ -158,7 +246,7 @@ export function App() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [session]);
 
   useEffect(() => {
     if (!tenantCollection.length) return;
@@ -168,9 +256,70 @@ export function App() {
     }
   }, [tenantCollection, selectedTenantId]);
 
+  const tenantCollectionForUI = useMemo(() => {
+    if (!isSupabaseConfigured) {
+      return tenantCollection;
+    }
+    if (!accessibleTenantIds.length) {
+      return tenantCollection;
+    }
+    const allowed = new Set(accessibleTenantIds);
+    return tenantCollection.filter((tenant) => allowed.has(tenant.id));
+  }, [tenantCollection, accessibleTenantIds, isSupabaseConfigured]);
+
   const tenant = useMemo(() => {
-    return tenantCollection.find((item) => item.id === selectedTenantId) ?? tenantCollection[0] ?? fallbackTenant;
-  }, [tenantCollection, selectedTenantId]);
+    const source = tenantCollectionForUI.length ? tenantCollectionForUI : tenantCollection;
+    return source.find((item) => item.id === selectedTenantId) ?? source[0] ?? fallbackTenant;
+  }, [tenantCollectionForUI, tenantCollection, selectedTenantId]);
+
+  const tenantAdminTenantIds = useMemo(
+    () =>
+      roleAssignments
+        .filter((assignment) => assignment.role === 'tenant_admin')
+        .map((assignment) => assignment.tenant_id),
+    [roleAssignments]
+  );
+
+  const currentUserId = session?.user?.id ?? null;
+  const canManageSelectedTenant =
+    !isSupabaseConfigured ||
+    isSuperAdmin ||
+    tenantAdminTenantIds.includes(tenant?.id);
+  const canCreateProfile = canManageSelectedTenant;
+
+  const canEditProfile = useCallback(
+    (profile) => {
+      if (!profile) return false;
+      if (!isSupabaseConfigured) return true;
+      if (isSuperAdmin) return true;
+      if (tenantAdminTenantIds.includes(profile.tenantId)) return true;
+      if (profile.userId && profile.userId === currentUserId) return true;
+      return false;
+    },
+    [isSupabaseConfigured, isSuperAdmin, tenantAdminTenantIds, currentUserId]
+  );
+
+  const tenantIdsForForm = useMemo(() => {
+    if (!isSupabaseConfigured) {
+      return tenantCollectionForUI.map((item) => item.id);
+    }
+    if (isSuperAdmin) {
+      return tenantCollectionForUI.map((item) => item.id);
+    }
+    return tenantAdminTenantIds;
+  }, [isSupabaseConfigured, tenantCollectionForUI, isSuperAdmin, tenantAdminTenantIds]);
+
+  const canEditTenantField =
+    !isSupabaseConfigured || isSuperAdmin || tenantIdsForForm.length > 1;
+
+  const tenantOptionsForForm = useMemo(() => {
+    if (!tenantCollectionForUI.length) return [];
+    if (!isSupabaseConfigured || isSuperAdmin) return tenantCollectionForUI;
+    const allowed = new Set(tenantIdsForForm);
+    return tenantCollectionForUI.filter((item) => allowed.has(item.id));
+  }, [tenantCollectionForUI, tenantIdsForForm, isSupabaseConfigured, isSuperAdmin]);
+
+  const lockedTenantId = canEditTenantField ? null : tenantOptionsForForm[0]?.id ?? tenant?.id;
 
   const tenantModules = useMemo(
     () => getTenantModules(tenant, moduleCatalog),
@@ -200,9 +349,15 @@ export function App() {
     });
   }, [profiles, tenant, profileQuery, profileStatusFilter, activeTenantSlug]);
 
-  const handleTenantChange = useCallback((nextId) => {
-    setSelectedTenantId(nextId);
-  }, []);
+  const handleTenantChange = useCallback(
+    (nextId) => {
+      if (isSupabaseConfigured && accessibleTenantIds.length && !accessibleTenantIds.includes(nextId)) {
+        return;
+      }
+      setSelectedTenantId(nextId);
+    },
+    [accessibleTenantIds, isSupabaseConfigured]
+  );
 
   const handleFilterChange = useCallback((filter) => {
     setModuleFilter(filter);
@@ -221,21 +376,50 @@ export function App() {
     { id: 'users', label: 'Usuários e Perfis', description: 'Base de pessoas por tenant' },
   ];
 
+  const handleLogin = useCallback(
+    async ({ email, password }) => {
+      if (!supabase) return;
+      setAuthError(null);
+      setIsSigningIn(true);
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) {
+        console.error('Falha no login', error);
+        setAuthError('Credenciais inválidas ou sem permissão.');
+      }
+      setIsSigningIn(false);
+    },
+    []
+  );
+
+  const handleLogout = useCallback(async () => {
+    if (!supabase) return;
+    await supabase.auth.signOut();
+    setRoleAssignments([]);
+  }, []);
+
   const handleOpenCreateProfile = useCallback(() => {
+    if (!canCreateProfile) {
+      setProfileFormError('Você não tem permissão para criar perfis neste tenant.');
+      return;
+    }
     setEditingProfile(null);
     setIsUserFormOpen(true);
     setProfileFormError(null);
-  }, []);
+  }, [canCreateProfile]);
 
   const handleOpenEditProfile = useCallback(
     (profileId) => {
       const target = profiles.find((profile) => profile.id === profileId);
       if (!target) return;
+       if (!canEditProfile(target)) {
+        setProfileFormError('Você não tem permissão para editar este perfil.');
+        return;
+      }
       setEditingProfile(target);
       setIsUserFormOpen(true);
       setProfileFormError(null);
     },
-    [profiles]
+    [profiles, canEditProfile]
   );
 
   const handleCloseProfileForm = useCallback(() => {
@@ -248,6 +432,7 @@ export function App() {
     async (formData) => {
       const {
         tenantOptions: _tenantOptions,
+        avatarPreview: previewData,
         addresses = [],
         contacts = [],
         education = [],
@@ -261,24 +446,43 @@ export function App() {
       } = formData;
 
       const supabaseEnabled = isSupabaseConfigured && supabase;
+      const enforcedTenantId = canEditTenantField
+        ? profileForm.tenantId || tenant?.id || lockedTenantId
+        : lockedTenantId ?? tenant?.id ?? profileForm.tenantId;
+
+      if (!enforcedTenantId) {
+        setProfileFormError('Selecione um tenant válido.');
+        return;
+      }
+
+      if (editingProfile) {
+        if (!canEditProfile(editingProfile)) {
+          setProfileFormError('Você não tem permissão para editar este perfil.');
+          return;
+        }
+      } else if (!canCreateProfile) {
+        setProfileFormError('Você não tem permissão para criar perfis.');
+        return;
+      }
+
+      profileForm.tenantId = enforcedTenantId;
+
+      if (!supabaseEnabled && !profileForm.avatarUrl && previewData) {
+        profileForm.avatarUrl = previewData;
+      }
+
       setIsSavingProfile(true);
       setProfileFormError(null);
 
       try {
-        if (supabaseEnabled && avatarFile) {
-          profileForm.avatarUrl = await uploadAvatarToStorage(avatarFile, profileForm.tenantId);
-        }
         let profileRecord;
+        const payload = buildProfilePayload(profileForm);
+
         if (editingProfile) {
           if (supabaseEnabled) {
-            const { data, error } = await supabase
-              .from('profiles')
-              .update(buildProfilePayload(profileForm))
-              .eq('id', editingProfile.id)
-              .select(profileSelectFields)
-              .single();
+            const { error } = await supabase.from('profiles').update(payload).eq('id', editingProfile.id);
             if (error) throw error;
-            await saveProfileRelations(data.id, {
+            await saveProfileRelations(editingProfile.id, {
               addresses,
               contacts,
               education,
@@ -288,7 +492,7 @@ export function App() {
               practices,
               contributions,
             });
-            profileRecord = data;
+            profileRecord = await refetchProfile(editingProfile.id);
           } else {
             profileRecord = buildLocalProfileRecord(editingProfile.id, profileForm, {
               addresses,
@@ -301,15 +505,9 @@ export function App() {
               contributions,
             });
           }
-          const normalized = normalizeProfileRecord(profileRecord, tenantCollection);
-          setProfiles((prev) => prev.map((profile) => (profile.id === normalized.id ? normalized : profile)));
         } else {
           if (supabaseEnabled) {
-            const { data, error } = await supabase
-              .from('profiles')
-              .insert(buildProfilePayload(profileForm))
-              .select(profileSelectFields)
-              .single();
+            const { data, error } = await supabase.from('profiles').insert(payload).select('id').single();
             if (error) throw error;
             await saveProfileRelations(data.id, {
               addresses,
@@ -321,9 +519,10 @@ export function App() {
               practices,
               contributions,
             });
-            profileRecord = data;
+            profileRecord = await refetchProfile(data.id);
           } else {
-            profileRecord = buildLocalProfileRecord(generateLocalId(), profileForm, {
+            const localId = generateLocalId();
+            profileRecord = buildLocalProfileRecord(localId, profileForm, {
               addresses,
               contacts,
               education,
@@ -334,9 +533,31 @@ export function App() {
               contributions,
             });
           }
-          const normalized = normalizeProfileRecord(profileRecord, tenantCollection);
-          setProfiles((prev) => [...prev, normalized]);
         }
+
+        if (supabaseEnabled && avatarFile) {
+          const avatarUrl = await uploadAvatarToStorage(
+            avatarFile,
+            profileForm.tenantId,
+            profileRecord.id,
+            session?.user
+          );
+          const { error: avatarError } = await supabase
+            .from('profiles')
+            .update({ avatar_url: avatarUrl })
+            .eq('id', profileRecord.id);
+          if (avatarError) throw avatarError;
+          profileRecord = await refetchProfile(profileRecord.id);
+        }
+
+        const normalized = normalizeProfileRecord(profileRecord, tenantCollection);
+        setProfiles((prev) => {
+          const exists = prev.some((profile) => profile.id === normalized.id);
+          if (exists) {
+            return prev.map((profile) => (profile.id === normalized.id ? normalized : profile));
+          }
+          return [...prev, normalized];
+        });
 
         setIsUserFormOpen(false);
         setEditingProfile(null);
@@ -347,15 +568,56 @@ export function App() {
         setIsSavingProfile(false);
       }
     },
-    [editingProfile, tenantCollection]
+    [
+      canCreateProfile,
+      canEditProfile,
+      canEditTenantField,
+      editingProfile,
+      isSupabaseConfigured,
+      lockedTenantId,
+      session,
+      tenant,
+      tenantCollection,
+    ]
   );
+
+  async function refetchProfile(profileId) {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select(profileSelectFields)
+      .eq('id', profileId)
+      .single();
+    if (error) throw error;
+    return data;
+  }
+
+  if (isSupabaseConfigured) {
+    if (isAuthLoading) {
+      return html`<div className="app-shell"><p>Conferindo sessão...</p></div>`;
+    }
+    if (!session) {
+      return html`
+        <div className="app-shell app-shell--auth">
+          <${LoginPanel} onSubmit=${handleLogin} isLoading=${isSigningIn} error=${authError} />
+        </div>
+      `;
+    }
+  }
 
   return html`
     <div className="app-shell">
+      ${isSupabaseConfigured &&
+      session &&
+      html`
+        <div className="auth-banner">
+          <span>${session.user.email}</span>
+          <button type="button" className="ghost-button" onClick=${handleLogout}>Sair</button>
+        </div>
+      `}
       <${Header}
         title="REVA Enterprise"
         subtitle="Controle unificado dos tenants, planos e módulos licenciáveis."
-        tenants=${tenantCollection}
+        tenants=${tenantCollectionForUI.length ? tenantCollectionForUI : tenantCollection}
         selectedTenantId=${tenant?.id}
         onTenantChange=${handleTenantChange}
         actions=${quickActions}
@@ -401,15 +663,20 @@ export function App() {
           errorMessage=${loadError}
           onCreate=${handleOpenCreateProfile}
           onEdit=${handleOpenEditProfile}
+          canCreate=${canCreateProfile}
+          canEditProfile=${canEditProfile}
         />
         ${isUserFormOpen &&
       html`<${UserFormPanel}
-          tenants=${tenantCollection}
-          initialData=${editingProfile}
+          tenants=${tenantOptionsForForm}
+          initialData=${editingProfile ?? { tenantId: lockedTenantId ?? tenant?.id }}
           onSubmit=${handleProfileSubmit}
           onCancel=${handleCloseProfileForm}
           isSaving=${isSavingProfile}
           error=${profileFormError}
+          lockedTenantId=${lockedTenantId}
+          canEditTenant=${canEditTenantField}
+          canEditRole=${isSuperAdmin}
         />`}
       `}
     </div>
@@ -454,6 +721,8 @@ function normalizeProfileRecord(record, tenants = []) {
     associationStatus: record.association_status ?? record.associationStatus ?? 'pending',
     avatarUrl: record.avatar_url ?? record.avatarUrl ?? '',
     notes: record.notes ?? '',
+    userId: record.user_id ?? record.userId ?? null,
+    role: record.role ?? record.profileRole ?? 'associado',
     addresses: addressesSource.map((address) => ({
       id: address.id ?? generateLocalId(),
       type: address.type ?? '',
@@ -553,6 +822,7 @@ function buildProfilePayload(profileForm) {
     association_status: profileForm.associationStatus,
     avatar_url: profileForm.avatarUrl,
     notes: profileForm.notes,
+    role: profileForm.role ?? 'associado',
   };
 }
 
@@ -592,64 +862,30 @@ async function syncChildTable(table, profileId, items, mapper) {
   if (insertError) throw insertError;
 }
 
-async function ensureUserAuthenticated() {
-  if (!supabase) throw new Error('Supabase não configurado.');
-
-  const { data: { user }, error } = await supabase.auth.getUser();
-
-  if (error || !user) {
-    console.log('Usuário não autenticado. Tentando autenticação anônima...');
-    const { data, error: anonError } = await supabase.auth.signInAnonymously();
-    if (anonError) {
-      throw new Error('Falha ao autenticar: ' + anonError.message);
-    }
-    console.log('Autenticação anônima bem-sucedida');
-    return data.user;
-  }
-
-  console.log('Usuário já autenticado:', user.id);
-  return user;
-}
-
 const AVATAR_BUCKET = 'profile-photos';
 
-async function uploadAvatarToStorage(file, tenantId) {
+async function uploadAvatarToStorage(file, tenantId, profileId, currentUser) {
   if (!supabase) throw new Error('Supabase não configurado para upload de fotos.');
+  if (!currentUser?.id) throw new Error('Faça login para enviar imagens.');
 
-  try {
-    // Garanta que o usuário está autenticado
-    const user = await ensureUserAuthenticated();
-    console.log('Iniciando upload de avatar para usuário:', user.id);
+  const extension = extractFileExtension(file.name) || 'jpg';
+  const tenantFolder = tenantId ?? 'global';
+  const fileName = `${tenantFolder}/${profileId}/${generateFileName()}.${extension}`;
 
-    const extension = extractFileExtension(file.name) || 'jpg';
-    const pathPrefix = tenantId || 'global';
-    const fileName = `${pathPrefix}/${generateFileName()}.${extension}`;
+  const { error } = await supabase.storage
+    .from(AVATAR_BUCKET)
+    .upload(fileName, file, {
+      upsert: true,
+      cacheControl: '3600',
+    });
 
-    console.log('Enviando arquivo:', fileName);
-
-    const { error } = await supabase.storage
-      .from(AVATAR_BUCKET)
-      .upload(fileName, file, {
-        upsert: true,
-        cacheControl: '3600',
-      });
-
-    if (error) {
-      console.error('Erro ao fazer upload:', error);
-      throw error;
-    }
-
-    console.log('Upload bem-sucedido. Obtendo URL pública...');
-    const { data } = supabase.storage
-      .from(AVATAR_BUCKET)
-      .getPublicUrl(fileName);
-
-    console.log('URL pública obtida:', data.publicUrl);
-    return data.publicUrl;
-  } catch (error) {
-    console.error('Erro em uploadAvatarToStorage:', error);
+  if (error) {
+    console.error('Erro ao fazer upload:', error);
     throw error;
   }
+
+  const { data } = supabase.storage.from(AVATAR_BUCKET).getPublicUrl(fileName);
+  return data.publicUrl;
 }
 function extractFileExtension(name = '') {
   const parts = name.split('.');
