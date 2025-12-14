@@ -1,0 +1,32 @@
+export const tenants = [
+  {
+    id: 'assobrafir',
+    name: 'ASSOBRAFIR',
+    segment: 'Fisioterapia',
+    plan: 'Enterprise',
+    status: 'ativo',
+    activeModules: ['users', 'payments', 'events', 'communications', 'analytics'],
+    comingSoon: ['legal', 'science'],
+    priority: 'Alta adoção de eventos híbridos',
+  },
+  {
+    id: 'confisio',
+    name: 'Confisio Brasil',
+    segment: 'Conselho Profissional',
+    plan: 'Professional',
+    status: 'implementacao',
+    activeModules: ['users', 'governance', 'support'],
+    comingSoon: ['payments', 'analytics'],
+    priority: 'Migrar jurídico e comunicação',
+  },
+  {
+    id: 'rede_cientifica',
+    name: 'Rede Científica Integrada',
+    segment: 'Frente acadêmica',
+    plan: 'Prime',
+    status: 'piloto',
+    activeModules: ['users', 'science'],
+    comingSoon: ['events', 'communications', 'analytics'],
+    priority: 'Consolidar produções científicas',
+  },
+];
