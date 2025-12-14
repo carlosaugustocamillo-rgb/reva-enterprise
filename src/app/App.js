@@ -366,7 +366,7 @@ export function App() {
         onChange=${(nextId) => setWorkspaceView(nextId)}
       />
       ${workspaceView === 'overview' &&
-      html`
+    html`
         <${InsightPanel} cards=${insightCards} />
         <div className="content-grid">
           <section className="module-panel card">
@@ -378,9 +378,9 @@ export function App() {
               <${ModuleFilters} activeFilter=${moduleFilter} onChange=${handleFilterChange} />
             </div>
             ${isLoading &&
-            html`<p className="data-feedback">Sincronizando com Supabase...</p>`}
+      html`<p className="data-feedback">Sincronizando com Supabase...</p>`}
             ${loadError &&
-            html`<p className="data-feedback data-feedback--error">${loadError}</p>`}
+      html`<p className="data-feedback data-feedback--error">${loadError}</p>`}
             <${ModuleGrid} modules=${visibleModules} />
           </section>
           <div className="side-column">
@@ -390,7 +390,7 @@ export function App() {
         </div>
       `}
       ${workspaceView === 'users' &&
-      html`
+    html`
         <${UserDirectoryPanel}
           profiles=${filteredProfiles}
           query=${profileQuery}
@@ -403,7 +403,7 @@ export function App() {
           onEdit=${handleOpenEditProfile}
         />
         ${isUserFormOpen &&
-        html`<${UserFormPanel}
+      html`<${UserFormPanel}
           tenants=${tenantCollection}
           initialData=${editingProfile}
           onSubmit=${handleProfileSubmit}
@@ -592,22 +592,65 @@ async function syncChildTable(table, profileId, items, mapper) {
   if (insertError) throw insertError;
 }
 
+async function ensureUserAuthenticated() {
+  if (!supabase) throw new Error('Supabase não configurado.');
+
+  const { data: { user }, error } = await supabase.auth.getUser();
+
+  if (error || !user) {
+    console.log('Usuário não autenticado. Tentando autenticação anônima...');
+    const { data, error: anonError } = await supabase.auth.signInAnonymously();
+    if (anonError) {
+      throw new Error('Falha ao autenticar: ' + anonError.message);
+    }
+    console.log('Autenticação anônima bem-sucedida');
+    return data.user;
+  }
+
+  console.log('Usuário já autenticado:', user.id);
+  return user;
+}
+
 const AVATAR_BUCKET = 'profile-photos';
 
 async function uploadAvatarToStorage(file, tenantId) {
   if (!supabase) throw new Error('Supabase não configurado para upload de fotos.');
-  const extension = extractFileExtension(file.name) || 'jpg';
-  const pathPrefix = tenantId || 'global';
-  const fileName = `${pathPrefix}/${generateFileName()}.${extension}`;
-  const { error } = await supabase.storage.from(AVATAR_BUCKET).upload(fileName, file, {
-    upsert: true,
-    cacheControl: '3600',
-  });
-  if (error) throw error;
-  const { data } = supabase.storage.from(AVATAR_BUCKET).getPublicUrl(fileName);
-  return data.publicUrl;
-}
 
+  try {
+    // Garanta que o usuário está autenticado
+    const user = await ensureUserAuthenticated();
+    console.log('Iniciando upload de avatar para usuário:', user.id);
+
+    const extension = extractFileExtension(file.name) || 'jpg';
+    const pathPrefix = tenantId || 'global';
+    const fileName = `${pathPrefix}/${generateFileName()}.${extension}`;
+
+    console.log('Enviando arquivo:', fileName);
+
+    const { error } = await supabase.storage
+      .from(AVATAR_BUCKET)
+      .upload(fileName, file, {
+        upsert: true,
+        cacheControl: '3600',
+      });
+
+    if (error) {
+      console.error('Erro ao fazer upload:', error);
+      throw error;
+    }
+
+    console.log('Upload bem-sucedido. Obtendo URL pública...');
+    const { data } = supabase.storage
+      .from(AVATAR_BUCKET)
+      .getPublicUrl(fileName);
+
+    console.log('URL pública obtida:', data.publicUrl);
+    return data.publicUrl;
+  } catch (error) {
+    console.error('Erro em uploadAvatarToStorage:', error);
+    throw error;
+  }
+}
 function extractFileExtension(name = '') {
   const parts = name.split('.');
   if (parts.length <= 1) return '';

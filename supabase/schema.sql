@@ -189,12 +189,118 @@ create table if not exists public.profile_contributions (
   created_at timestamptz default now()
 );
 
+-- RLS e políticas temporárias (liberadas) para desenvolvimento
+alter table public.profiles enable row level security;
+drop policy if exists "Allow public manage profiles" on public.profiles;
+create policy "Allow public manage profiles"
+  on public.profiles
+  for all
+  to anon
+  using (true)
+  with check (true);
+
+alter table public.profile_addresses enable row level security;
+drop policy if exists "Allow public manage profile_addresses" on public.profile_addresses;
+create policy "Allow public manage profile_addresses"
+  on public.profile_addresses
+  for all
+  to anon
+  using (true)
+  with check (true);
+
+alter table public.profile_contacts enable row level security;
+drop policy if exists "Allow public manage profile_contacts" on public.profile_contacts;
+create policy "Allow public manage profile_contacts"
+  on public.profile_contacts
+  for all
+  to anon
+  using (true)
+  with check (true);
+
+alter table public.profile_education enable row level security;
+drop policy if exists "Allow public manage profile_education" on public.profile_education;
+create policy "Allow public manage profile_education"
+  on public.profile_education
+  for all
+  to anon
+  using (true)
+  with check (true);
+
+alter table public.profile_specialties enable row level security;
+drop policy if exists "Allow public manage profile_specialties" on public.profile_specialties;
+create policy "Allow public manage profile_specialties"
+  on public.profile_specialties
+  for all
+  to anon
+  using (true)
+  with check (true);
+
+alter table public.profile_roles enable row level security;
+drop policy if exists "Allow public manage profile_roles" on public.profile_roles;
+create policy "Allow public manage profile_roles"
+  on public.profile_roles
+  for all
+  to anon
+  using (true)
+  with check (true);
+
+alter table public.profile_titularities enable row level security;
+drop policy if exists "Allow public manage profile_titularities" on public.profile_titularities;
+create policy "Allow public manage profile_titularities"
+  on public.profile_titularities
+  for all
+  to anon
+  using (true)
+  with check (true);
+
+alter table public.profile_practices enable row level security;
+drop policy if exists "Allow public manage profile_practices" on public.profile_practices;
+create policy "Allow public manage profile_practices"
+  on public.profile_practices
+  for all
+  to anon
+  using (true)
+  with check (true);
+
+alter table public.profile_contributions enable row level security;
+drop policy if exists "Allow public manage profile_contributions" on public.profile_contributions;
+create policy "Allow public manage profile_contributions"
+  on public.profile_contributions
+  for all
+  to anon
+  using (true)
+  with check (true);
+
+-- Garantir bucket de avatares e policies
+insert into storage.buckets (id, name, public)
+select 'profile-photos', 'profile-photos', true
+where not exists (select 1 from storage.buckets where id = 'profile-photos');
+
+drop policy if exists "Allow authenticated upload avatars" on storage.objects;
+create policy "Allow authenticated upload avatars"
+  on storage.objects for insert
+  to anon
+  with check (bucket_id = 'profile-photos');
+
+drop policy if exists "Allow authenticated update avatars" on storage.objects;
+create policy "Allow authenticated update avatars"
+  on storage.objects for update
+  to anon
+  using (bucket_id = 'profile-photos')
+  with check (bucket_id = 'profile-photos');
+
+drop policy if exists "Allow authenticated delete avatars" on storage.objects;
+create policy "Allow authenticated delete avatars"
+  on storage.objects for delete
+  to anon
+  using (bucket_id = 'profile-photos');
+
 insert into public.profiles
   (tenant_id, external_reference, full_name, preferred_name, email, document_id, council_number, council_state, nationality, gender, marital_status, birth_date, category, status, regional, membership_type, membership_started_at, membership_expires_at, association_status, avatar_url, notes)
 values
-  ((select id from public.tenants where slug = 'assobrafir'), 'LEG-001', 'Fernanda Tavares', 'Fer Tavares', 'fernanda.tavares@assobrafir.org', '123.456.789-00', 'CREFITO 3/123456-F', 'SP', 'Brasileira', 'Feminino', 'Solteira', '1989-04-02', 'especialista', 'ativo', 'Sudeste', 'professional_annual', '2022-03-01', '2025-03-01', 'ativa', null, 'Especialista em ventilação mecânica'),
-  ((select id from public.tenants where slug = 'assobrafir'), 'LEG-002', 'Ricardo Moreno', 'Ricardo', 'ricardo.moreno@assobrafir.org', '987.654.321-00', 'CREFITO 4/654321-F', 'MG', 'Brasileiro', 'Masculino', 'Casado', '1984-11-15', 'efetivo', 'ativo', 'Sudeste', 'professional_monthly', '2023-01-10', '2024-12-31', 'ativa', null, null),
-  ((select id from public.tenants where slug = 'confisio'), 'LEG-003', 'Helena Prado', 'Helena', 'helena.prado@confisio.org', '102.938.475-11', 'CREFITO 2/789123-F', 'RJ', 'Brasileira', 'Feminino', 'Solteira', '1991-08-25', 'especialista', 'implementacao', 'Sudeste', 'professional_annual', '2024-02-15', '2025-02-15', 'pendente', null, 'Responsável pela região Sudeste')
+  ((select id from public.tenants where slug = 'assobrafir'), 'LEG-001', 'Fernanda Tavares', 'Fer Tavares', 'fernanda.tavares@assobrafir.org', '123.456.789-00', 'CREFITO 3/123456-F', 'SP', 'Brasileira', 'Feminino', 'Solteira', '1989-04-02', 'especialista', 'ativo', 'Sudeste', 'professional', '2022-03-01', '2025-03-01', 'ativa', null, 'Especialista em ventilação mecânica'),
+  ((select id from public.tenants where slug = 'assobrafir'), 'LEG-002', 'Ricardo Moreno', 'Ricardo', 'ricardo.moreno@assobrafir.org', '987.654.321-00', 'CREFITO 4/654321-F', 'MG', 'Brasileiro', 'Masculino', 'Casado', '1984-11-15', 'efetivo', 'ativo', 'Sudeste', 'professional', '2023-01-10', '2024-12-31', 'ativa', null, null),
+  ((select id from public.tenants where slug = 'confisio'), 'LEG-003', 'Helena Prado', 'Helena', 'helena.prado@confisio.org', '102.938.475-11', 'CREFITO 2/789123-F', 'RJ', 'Brasileira', 'Feminino', 'Solteira', '1991-08-25', 'especialista', 'implementacao', 'Sudeste', 'professional', '2024-02-15', '2025-02-15', 'pendente', null, 'Responsável pela região Sudeste')
 on conflict (external_reference) do nothing;
 
 insert into public.profile_addresses (profile_id, type, street, number, city, state, postal_code, is_primary)
