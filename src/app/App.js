@@ -256,6 +256,7 @@ export function App() {
         titularities = [],
         practices = [],
         contributions = [],
+        avatarFile = null,
         ...profileForm
       } = formData;
 
@@ -264,6 +265,9 @@ export function App() {
       setProfileFormError(null);
 
       try {
+        if (supabaseEnabled && avatarFile) {
+          profileForm.avatarUrl = await uploadAvatarToStorage(avatarFile, profileForm.tenantId);
+        }
         let profileRecord;
         if (editingProfile) {
           if (supabaseEnabled) {
@@ -438,7 +442,7 @@ function normalizeProfileRecord(record, tenants = []) {
     documentId: record.document_id ?? record.documentId ?? '',
     status: record.status ?? 'ativo',
     category: record.category ?? '',
-    membershipType: record.membership_type ?? record.membershipType ?? 'professional_annual',
+    membershipType: record.membership_type ?? record.membershipType ?? 'professional',
     councilNumber: record.council_number ?? record.councilNumber ?? '',
     councilState: record.council_state ?? record.councilState ?? '',
     nationality: record.nationality ?? '',
@@ -586,6 +590,35 @@ async function syncChildTable(table, profileId, items, mapper) {
   const payload = items.map((item) => mapper(item, profileId));
   const { error: insertError } = await supabase.from(table).insert(payload);
   if (insertError) throw insertError;
+}
+
+const AVATAR_BUCKET = 'profile-photos';
+
+async function uploadAvatarToStorage(file, tenantId) {
+  if (!supabase) throw new Error('Supabase não configurado para upload de fotos.');
+  const extension = extractFileExtension(file.name) || 'jpg';
+  const pathPrefix = tenantId || 'global';
+  const fileName = `${pathPrefix}/${generateFileName()}.${extension}`;
+  const { error } = await supabase.storage.from(AVATAR_BUCKET).upload(fileName, file, {
+    upsert: true,
+    cacheControl: '3600',
+  });
+  if (error) throw error;
+  const { data } = supabase.storage.from(AVATAR_BUCKET).getPublicUrl(fileName);
+  return data.publicUrl;
+}
+
+function extractFileExtension(name = '') {
+  const parts = name.split('.');
+  if (parts.length <= 1) return '';
+  return parts.pop().toLowerCase();
+}
+
+function generateFileName() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `file-${Date.now()}`;
 }
 
 function mapAddressPayload(address, profileId) {

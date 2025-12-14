@@ -14,29 +14,32 @@ const tabs = [
   { id: 'notes', label: 'Outros' },
 ];
 
-const statusOptions = [
-  { id: 'ativo', label: 'Ativo' },
-  { id: 'implementacao', label: 'Em implementação' },
-  { id: 'inativo', label: 'Inativo' },
-];
-
-const associationStatusOptions = [
-  { id: 'ativa', label: 'Ativa' },
-  { id: 'pendente', label: 'Pendente' },
-  { id: 'suspensa', label: 'Suspensa' },
-];
-
 const genderOptions = ['Feminino', 'Masculino', 'Outro'];
 
 const membershipOptions = [
-  { id: 'professional_annual', label: 'Profissional anual' },
-  { id: 'professional_monthly', label: 'Profissional mensal' },
+  { id: 'professional', label: 'Profissional' },
   { id: 'student', label: 'Estudante' },
+];
+
+const categoryOptions = [
+  { id: 'efetivo', label: 'Efetivo' },
+  { id: 'especialista', label: 'Especialista' },
+  { id: 'emerito', label: 'Emérito' },
+];
+
+const ufOptions = [
+  'AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'
+];
+
+const nationalityTypes = [
+  { id: 'br', label: 'Brasileiro' },
+  { id: 'foreign', label: 'Estrangeiro' },
 ];
 
 export function UserFormPanel({ tenants, initialData, onSubmit, onCancel, isSaving, error }) {
   const [activeTab, setActiveTab] = useState('personal');
   const [formState, setFormState] = useState(() => createDefaultState(initialData, tenants));
+  const [avatarError, setAvatarError] = useState(null);
 
   useEffect(() => {
     setFormState(createDefaultState(initialData, tenants));
@@ -66,6 +69,53 @@ export function UserFormPanel({ tenants, initialData, onSubmit, onCancel, isSavi
     onSubmit?.(formState);
   }
 
+  function handleCPFInput(event) {
+    const masked = formatCPF(event.target.value);
+    event.target.value = masked;
+    handleFieldChange('documentId', masked);
+  }
+
+  function handleCouncilInput(event) {
+    const masked = formatCouncil(event.target.value);
+    event.target.value = masked;
+    handleFieldChange('councilNumber', masked);
+  }
+
+  function handleNationalityTypeChange(event) {
+    const value = event.target.value;
+    if (value === 'br') {
+      handleFieldChange('nationalityType', value);
+      handleFieldChange('nationality', 'Brasileiro');
+      handleFieldChange('foreignCountry', '');
+    } else {
+      handleFieldChange('nationalityType', value);
+      handleFieldChange('nationality', formState.foreignCountry || '');
+    }
+  }
+
+  function handleForeignCountryChange(event) {
+    const value = event.target.value;
+    handleFieldChange('foreignCountry', value);
+    handleFieldChange('nationality', value);
+  }
+
+  function handleAvatarUpload(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      setAvatarError('A foto deve ter no máximo 5 MB.');
+      event.target.value = '';
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setAvatarError(null);
+      handleFieldChange('avatarFile', file);
+      handleFieldChange('avatarUrl', reader.result);
+    };
+    reader.readAsDataURL(file);
+  }
+
   return html`
     <section className="user-form card">
       <div className="user-form__header">
@@ -85,8 +135,22 @@ export function UserFormPanel({ tenants, initialData, onSubmit, onCancel, isSavi
           `;
         })}
       </div>
-      ${renderTabContent({ formState, handleFieldChange, handleArrayChange, handleAddItem, handleRemoveItem, activeTab })}
-      ${error && html`<p className="data-feedback data-feedback--error">${error}</p>`}
+      ${renderTabContent({
+        formState,
+        handleFieldChange,
+        handleArrayChange,
+        handleAddItem,
+        handleRemoveItem,
+        activeTab,
+        handleCPFInput,
+        handleCouncilInput,
+        handleNationalityTypeChange,
+        handleForeignCountryChange,
+        handleAvatarUpload,
+        avatarError,
+      })}
+      ${(error || avatarError) &&
+      html`<p className="data-feedback data-feedback--error">${error ?? avatarError}</p>`}
       <div className="user-form__actions">
         <button type="button" className="ghost-button" onClick=${onCancel} disabled=${isSaving}>Cancelar</button>
         <button type="button" className="primary-button" onClick=${handleSubmit} disabled=${isSaving}>
@@ -97,7 +161,19 @@ export function UserFormPanel({ tenants, initialData, onSubmit, onCancel, isSavi
   `;
 }
 
-function renderTabContent({ formState, handleFieldChange, handleArrayChange, handleAddItem, handleRemoveItem, activeTab }) {
+function renderTabContent({
+  formState,
+  handleFieldChange,
+  handleArrayChange,
+  handleAddItem,
+  handleRemoveItem,
+  activeTab,
+  handleCPFInput,
+  handleCouncilInput,
+  handleNationalityTypeChange,
+  handleForeignCountryChange,
+  handleAvatarUpload,
+}) {
   const tenantOptions = formState.tenantOptions ?? [];
   switch (activeTab) {
     case 'personal':
@@ -125,20 +201,43 @@ function renderTabContent({ formState, handleFieldChange, handleArrayChange, han
           </label>
           <label>
             <span>CPF</span>
-            <input type="text" value=${formState.documentId} onInput=${(event) => handleFieldChange('documentId', event.target.value)} />
+            <input
+              type="text"
+              inputmode="numeric"
+              value=${formState.documentId}
+              onInput=${handleCPFInput}
+              placeholder="000.000.000-00"
+            />
           </label>
           <label>
             <span>Conselho (número)</span>
-            <input type="text" value=${formState.councilNumber} onInput=${(event) => handleFieldChange('councilNumber', event.target.value)} />
+            <input
+              type="text"
+              value=${formState.councilNumber}
+              onInput=${handleCouncilInput}
+              placeholder="000.000-F"
+            />
           </label>
           <label>
             <span>UF do Conselho</span>
-            <input type="text" value=${formState.councilState} onInput=${(event) => handleFieldChange('councilState', event.target.value)} />
+            <select value=${formState.councilState} onChange=${(event) => handleFieldChange('councilState', event.target.value)}>
+              <option value="">Selecione</option>
+              ${ufOptions.map((uf) => html`<option key=${uf} value=${uf}>${uf}</option>`)}
+            </select>
           </label>
           <label>
             <span>Nacionalidade</span>
-            <input type="text" value=${formState.nationality} onInput=${(event) => handleFieldChange('nationality', event.target.value)} />
+            <select value=${formState.nationalityType} onChange=${handleNationalityTypeChange}>
+              ${nationalityTypes.map((option) => html`<option key=${option.id} value=${option.id}>${option.label}</option>`)}
+            </select>
           </label>
+          ${formState.nationalityType === 'foreign' &&
+          html`
+            <label>
+              <span>País de origem</span>
+              <input type="text" value=${formState.foreignCountry} onInput=${handleForeignCountryChange} />
+            </label>
+          `}
           <label>
             <span>Sexo</span>
             <select value=${formState.gender} onChange=${(event) => handleFieldChange('gender', event.target.value)}>
@@ -156,21 +255,9 @@ function renderTabContent({ formState, handleFieldChange, handleArrayChange, han
           </label>
           <label>
             <span>Categoria</span>
-            <input type="text" value=${formState.category} onInput=${(event) => handleFieldChange('category', event.target.value)} />
-          </label>
-          <label>
-            <span>Status</span>
-            <select value=${formState.status} onChange=${(event) => handleFieldChange('status', event.target.value)}>
-              ${statusOptions.map((option) => html`<option key=${option.id} value=${option.id}>${option.label}</option>`)}
-            </select>
-          </label>
-          <label>
-            <span>Status da associação</span>
-            <select
-              value=${formState.associationStatus}
-              onChange=${(event) => handleFieldChange('associationStatus', event.target.value)}
-            >
-              ${associationStatusOptions.map((option) => html`<option key=${option.id} value=${option.id}>${option.label}</option>`)}
+            <select value=${formState.category} onChange=${(event) => handleFieldChange('category', event.target.value)}>
+              <option value="">Selecione</option>
+              ${categoryOptions.map((option) => html`<option key=${option.id} value=${option.id}>${option.label}</option>`)}
             </select>
           </label>
           <label>
@@ -184,20 +271,15 @@ function renderTabContent({ formState, handleFieldChange, handleArrayChange, han
             <input
               type="date"
               value=${formState.membershipStartedAt}
-              onInput=${(event) => handleFieldChange('membershipStartedAt', event.target.value)}
+              disabled=${true}
             />
           </label>
           <label>
-            <span>Vigência final</span>
-            <input
-              type="date"
-              value=${formState.membershipExpiresAt}
-              onInput=${(event) => handleFieldChange('membershipExpiresAt', event.target.value)}
-            />
-          </label>
-          <label>
-            <span>URL da foto (quadrada)</span>
-            <input type="url" value=${formState.avatarUrl} onInput=${(event) => handleFieldChange('avatarUrl', event.target.value)} />
+            <span>Foto (quadrada)</span>
+            <input type="file" accept="image/*" onChange=${handleAvatarUpload} />
+            <small>Até 5 MB</small>
+            ${formState.avatarUrl &&
+            html`<div className="user-form__avatar-preview"><img src=${formState.avatarUrl} alt="Prévia do avatar" /></div>`}
           </label>
         </form>
       `;
@@ -487,6 +569,9 @@ function renderTabContent({ formState, handleFieldChange, handleArrayChange, han
 
 function createDefaultState(initialData, tenants) {
   const tenantId = initialData?.tenantId ?? tenants[0]?.id ?? '';
+  const initialNationality = initialData?.nationality ?? 'Brasileiro';
+  const isBrazilian = !initialNationality || initialNationality.toLowerCase() === 'brasileiro';
+  const normalizedMembership = initialData?.membershipType === 'student' ? 'student' : 'professional';
   return {
     tenantOptions: tenants,
     tenantId,
@@ -496,17 +581,20 @@ function createDefaultState(initialData, tenants) {
     documentId: initialData?.documentId ?? '',
     councilNumber: initialData?.councilNumber ?? '',
     councilState: initialData?.councilState ?? '',
-    nationality: initialData?.nationality ?? '',
+    nationality: initialNationality,
+    nationalityType: isBrazilian ? 'br' : 'foreign',
+    foreignCountry: isBrazilian ? '' : initialNationality,
     gender: initialData?.gender ?? '',
     maritalStatus: initialData?.maritalStatus ?? '',
     birthDate: initialData?.birthDate ?? '',
     category: initialData?.category ?? '',
     status: initialData?.status ?? 'ativo',
     associationStatus: initialData?.associationStatus ?? 'pendente',
-    membershipType: initialData?.membershipType ?? 'professional_annual',
-    membershipStartedAt: initialData?.membershipStartedAt ?? '',
+    membershipType: normalizedMembership,
+    membershipStartedAt: initialData?.membershipStartedAt ?? getSaoPauloTodayISO(),
     membershipExpiresAt: initialData?.membershipExpiresAt ?? '',
     avatarUrl: initialData?.avatarUrl ?? '',
+    avatarFile: null,
     notes: initialData?.notes ?? '',
     addresses: (initialData?.addresses ?? []).map((item) => ({ ...createAddressTemplate(), ...item })),
     contacts: (initialData?.contacts ?? []).map((item) => ({ ...createContactTemplate(), ...item })),
@@ -609,4 +697,34 @@ function createId() {
   return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID()
     : `local-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function formatCPF(value) {
+  return value
+    .replace(/\D/g, '')
+    .slice(0, 11)
+    .replace(/(\d{3})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d)/, '$1.$2')
+    .replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+}
+
+function formatCouncil(value) {
+  const digits = value.replace(/\D/g, '').slice(0, 6);
+  if (!digits) return '';
+  const first = digits.slice(0, 3);
+  const second = digits.slice(3);
+  if (digits.length <= 3) {
+    return first;
+  }
+  if (digits.length < 6) {
+    return `${first}.${second}`;
+  }
+  return `${first}.${second}-F`;
+}
+
+function getSaoPauloTodayISO() {
+  const now = new Date();
+  const utc = now.getTime() + now.getTimezoneOffset() * 60000;
+  const saoPaulo = new Date(utc + -3 * 60 * 60 * 1000);
+  return saoPaulo.toISOString().slice(0, 10);
 }
