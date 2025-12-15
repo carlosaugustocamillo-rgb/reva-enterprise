@@ -78,6 +78,14 @@
   margin-bottom: var(--gap-lg);
 }
 
+.panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-sm);
+  align-items: center;
+  justify-content: flex-end;
+}
+
 .panel-title {
   font-size: 1.4rem;
 }

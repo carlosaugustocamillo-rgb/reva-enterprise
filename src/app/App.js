@@ -16,6 +16,8 @@ import { UserDirectoryPanel } from '../components/users/UserDirectoryPanel.js';
 import { ModuleWorkspaceNav } from '../components/ModuleWorkspaceNav.js';
 import { UserFormPanel } from '../components/users/UserFormPanel.js';
 import { LoginPanel } from '../components/auth/LoginPanel.js';
+import { TenantModuleManager } from '../components/TenantModuleManager.js';
+import { TenantConsoleView } from '../components/TenantConsoleView.js';
 import { getTenantModules, filterModules } from './moduleStatus.js';
 
 const fallbackTenant = {
@@ -28,7 +30,18 @@ const fallbackTenant = {
   priority: 'Adicione o primeiro tenant',
 };
 
-const initialTenantId = seedTenants[0]?.id ?? fallbackTenant.id;
+const tenantViewQuery =
+  typeof window !== 'undefined'
+    ? new URLSearchParams(window.location.search).get('tenantView')
+    : null;
+const tenantModuleQuery =
+  typeof window !== 'undefined'
+    ? new URLSearchParams(window.location.search).get('module')
+    : null;
+const initialTenantId =
+  resolveTenantIdFromCollection(tenantViewQuery, seedTenants) ??
+  seedTenants[0]?.id ??
+  fallbackTenant.id;
 const profileSelectFields = `
   id,
   tenant_id,
@@ -63,6 +76,74 @@ const profileSelectFields = `
   profile_contributions(*),
   tenant:tenants(id, name, slug)
 `;
+
+// Função para criar novo usuário (apenas Super Admin)
+async function createNewUser(email, password, tenantId, role, fullName) {
+  if (!supabase) throw new Error('Supabase não configurado.');
+
+  try {
+    // Criar usuário no Supabase Auth
+    const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+    });
+
+    if (authError) {
+      console.error('Erro ao criar usuário:', authError);
+      throw new Error(`Erro ao criar usuário: ${authError.message}`);
+    }
+
+    console.log('Usuário criado:', authData.user.id);
+
+    // Atribuir role ao usuário
+    const { error: roleError } = await supabase
+      .from('user_roles')
+      .insert({
+        user_id: authData.user.id,
+        tenant_id: tenantId,
+        role: role,
+      });
+
+    if (roleError) {
+      console.error('Erro ao atribuir role:', roleError);
+      throw new Error(`Erro ao atribuir role: ${roleError.message}`);
+    }
+
+    console.log(`Role '${role}' atribuído ao usuário`);
+
+    // Criar perfil associado
+    const { data: profileData, error: profileError } = await supabase
+      .from('profiles')
+      .insert({
+        user_id: authData.user.id,
+        tenant_id: tenantId,
+        full_name: fullName,
+        email: email,
+        role: role,
+        status: 'ativo',
+      })
+      .select()
+      .single();
+
+    if (profileError) {
+      console.error('Erro ao criar perfil:', profileError);
+      throw new Error(`Erro ao criar perfil: ${profileError.message}`);
+    }
+
+    console.log('Perfil criado:', profileData.id);
+
+    return {
+      userId: authData.user.id,
+      profileId: profileData.id,
+      email: email,
+      role: role,
+    };
+  } catch (error) {
+    console.error('Erro em createNewUser:', error);
+    throw error;
+  }
+}
 
 export function App() {
   const [tenantCollection, setTenantCollection] = useState(seedTenants);
@@ -115,6 +196,11 @@ export function App() {
   const [authError, setAuthError] = useState(null);
   const [isAuthLoading, setIsAuthLoading] = useState(isSupabaseConfigured);
   const [isSigningIn, setIsSigningIn] = useState(false);
+  const [isModuleManagerOpen, setIsModuleManagerOpen] = useState(false);
+  const [moduleManagerTenant, setModuleManagerTenant] = useState(null);
+  const [moduleManagerError, setModuleManagerError] = useState(null);
+  const [isSavingModules, setIsSavingModules] = useState(false);
+  const [tenantConsoleModuleId, setTenantConsoleModuleId] = useState(tenantModuleQuery);
 
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) {
@@ -141,10 +227,12 @@ export function App() {
     };
   }, []);
 
+  const sessionUserId = session?.user?.id ?? null;
+
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) return;
-    if (!session?.user) {
-      setRoleAssignments([]);
+    if (!sessionUserId) {
+      setRoleAssignments((prev) => (prev.length ? [] : prev));
       return;
     }
 
@@ -153,7 +241,7 @@ export function App() {
       const { data, error } = await supabase
         .from('user_roles')
         .select('id, role, tenant_id, tenants:tenants(id, name, slug)')
-        .eq('user_id', session.user.id);
+        .eq('user_id', sessionUserId);
       if (!active) return;
       if (error) {
         console.error('Falha ao buscar roles', error);
@@ -168,7 +256,7 @@ export function App() {
     return () => {
       active = false;
     };
-  }, [session]);
+  }, [isSupabaseConfigured, sessionUserId]);
 
   const accessibleTenantIds = useMemo(() => {
     if (!isSupabaseConfigured) {
@@ -185,8 +273,10 @@ export function App() {
   }, [isSupabaseConfigured, session, roleAssignments, tenantCollection]);
 
   const isSuperAdmin = useMemo(
-    () => roleAssignments.some((assignment) => assignment.role === 'super_admin'),
-    [roleAssignments]
+    () =>
+      !isSupabaseConfigured ||
+      roleAssignments.some((assignment) => assignment.role === 'super_admin'),
+    [isSupabaseConfigured, roleAssignments]
   );
 
   useEffect(() => {
@@ -225,7 +315,9 @@ export function App() {
 
         if (!isMounted) return;
 
-        setTenantCollection(tenantResponse.data ?? []);
+        setTenantCollection(
+          (tenantResponse.data ?? []).map((item) => normalizeTenantRecord(item))
+        );
         setModuleCatalog(moduleResponse.data ?? []);
         const normalizedProfiles = (profileResponse.data ?? []).map((profile) =>
           normalizeProfileRecord(profile, tenantResponse.data ?? tenantCollection)
@@ -249,11 +341,15 @@ export function App() {
   }, [session]);
 
   useEffect(() => {
-    if (!tenantCollection.length) return;
+    if (!tenantCollection.length || !selectedTenantId) return;
     const exists = tenantCollection.some((tenant) => tenant.id === selectedTenantId);
-    if (!exists) {
-      setSelectedTenantId(tenantCollection[0]?.id ?? fallbackTenant.id);
+    if (exists) return;
+    const slugMatch = tenantCollection.find((tenant) => tenant.slug === selectedTenantId);
+    if (slugMatch) {
+      setSelectedTenantId(slugMatch.id);
+      return;
     }
+    setSelectedTenantId(tenantCollection[0]?.id ?? fallbackTenant.id);
   }, [tenantCollection, selectedTenantId]);
 
   const tenantCollectionForUI = useMemo(() => {
@@ -272,6 +368,52 @@ export function App() {
     return source.find((item) => item.id === selectedTenantId) ?? source[0] ?? fallbackTenant;
   }, [tenantCollectionForUI, tenantCollection, selectedTenantId]);
 
+  const tenantModules = useMemo(
+    () => getTenantModules(tenant, moduleCatalog),
+    [tenant, moduleCatalog]
+  );
+
+  const visibleModules = useMemo(
+    () => filterModules(tenantModules, moduleFilter),
+    [tenantModules, moduleFilter]
+  );
+
+  const tenantConsoleOwnerTenantId = useMemo(() => {
+    const source = tenantCollectionForUI.length ? tenantCollectionForUI : tenantCollection;
+    if (tenantViewQuery) {
+      const resolved = resolveTenantIdFromCollection(tenantViewQuery, source);
+      if (resolved) return resolved;
+    }
+    if (isSupabaseConfigured && !isSuperAdmin) {
+      return accessibleTenantIds[0] ?? source[0]?.id ?? null;
+    }
+    return null;
+  }, [
+    tenantViewQuery,
+    tenantCollectionForUI,
+    tenantCollection,
+    isSupabaseConfigured,
+    isSuperAdmin,
+    accessibleTenantIds,
+  ]);
+  const isTenantConsoleMode = Boolean(tenantConsoleOwnerTenantId);
+
+  const selectedTenantConsoleModule = useMemo(() => {
+    if (!isTenantConsoleMode) return null;
+    if (!tenantModules.length) return null;
+    if (tenantConsoleModuleId) {
+      const found = tenantModules.find((module) => module.id === tenantConsoleModuleId);
+      if (found) return found;
+    }
+    return tenantModules[0];
+  }, [isTenantConsoleMode, tenantConsoleModuleId, tenantModules]);
+
+  useEffect(() => {
+    if (!isTenantConsoleMode || !tenantConsoleOwnerTenantId) return;
+    if (selectedTenantId === tenantConsoleOwnerTenantId) return;
+    setSelectedTenantId(tenantConsoleOwnerTenantId);
+  }, [isTenantConsoleMode, tenantConsoleOwnerTenantId, selectedTenantId]);
+
   const tenantAdminTenantIds = useMemo(
     () =>
       roleAssignments
@@ -280,7 +422,7 @@ export function App() {
     [roleAssignments]
   );
 
-  const currentUserId = session?.user?.id ?? null;
+  const currentUserId = sessionUserId;
   const canManageSelectedTenant =
     !isSupabaseConfigured ||
     isSuperAdmin ||
@@ -291,9 +433,16 @@ export function App() {
     (profile) => {
       if (!profile) return false;
       if (!isSupabaseConfigured) return true;
+
+      // Super Admin pode editar todos
       if (isSuperAdmin) return true;
+
+      // Tenant Admin pode editar usuários do seu tenant
       if (tenantAdminTenantIds.includes(profile.tenantId)) return true;
-      if (profile.userId && profile.userId === currentUserId) return true;
+
+      // Associado pode editar apenas seu próprio perfil
+      if (profile.role === 'associado' && profile.userId === currentUserId) return true;
+
       return false;
     },
     [isSupabaseConfigured, isSuperAdmin, tenantAdminTenantIds, currentUserId]
@@ -320,16 +469,6 @@ export function App() {
   }, [tenantCollectionForUI, tenantIdsForForm, isSupabaseConfigured, isSuperAdmin]);
 
   const lockedTenantId = canEditTenantField ? null : tenantOptionsForForm[0]?.id ?? tenant?.id;
-
-  const tenantModules = useMemo(
-    () => getTenantModules(tenant, moduleCatalog),
-    [tenant, moduleCatalog]
-  );
-
-  const visibleModules = useMemo(
-    () => filterModules(tenantModules, moduleFilter),
-    [tenantModules, moduleFilter]
-  );
 
   const activeTenantSlug = tenant?.slug ?? tenant?.id;
 
@@ -375,6 +514,13 @@ export function App() {
     { id: 'overview', label: 'Visão geral', description: 'KPIs e módulos contratados' },
     { id: 'users', label: 'Usuários e Perfis', description: 'Base de pessoas por tenant' },
   ];
+  const headerActions = useMemo(
+    () =>
+      quickActions.map((action) =>
+        action.id === 'launchModule' ? { ...action, disabled: !isSuperAdmin } : action
+      ),
+    [isSuperAdmin]
+  );
 
   const handleLogin = useCallback(
     async ({ email, password }) => {
@@ -393,10 +539,73 @@ export function App() {
 
   const handleLogout = useCallback(async () => {
     if (!supabase) return;
-    await supabase.auth.signOut();
-    setRoleAssignments([]);
+    try {
+      await supabase.auth.signOut();
+    } catch (error) {
+      console.error('Falha ao encerrar sessão', error);
+    } finally {
+      setSession(null);
+      setRoleAssignments([]);
+      setWorkspaceView('overview');
+      setIsUserFormOpen(false);
+      setEditingProfile(null);
+      setModuleManagerTenant(null);
+      setModuleManagerError(null);
+      setIsModuleManagerOpen(false);
+      setTenantConsoleModuleId(null);
+
+      if (typeof window !== 'undefined') {
+        const params = new URLSearchParams(window.location.search);
+        params.delete('tenantView');
+        params.delete('module');
+        const newQuery = params.toString();
+        const nextUrl = newQuery ? `${window.location.pathname}?${newQuery}` : window.location.pathname;
+        window.history.replaceState({}, '', nextUrl);
+      }
+    }
   }, []);
 
+  const handleCreateNewUser = useCallback(
+    async (userData) => {
+      if (!isSuperAdmin) {
+        setProfileFormError('Apenas Super Admin pode criar novos usuários.');
+        return;
+      }
+
+      setIsSavingProfile(true);
+      setProfileFormError(null);
+
+      try {
+        const result = await createNewUser(
+          userData.email,
+          userData.password,
+          userData.tenantId,
+          userData.role,
+          userData.fullName
+        );
+
+        console.log('Usuário criado com sucesso:', result);
+
+        // Recarregar dados
+        const { data: updatedRoles } = await supabase
+          .from('user_roles')
+          .select('id, role, tenant_id, tenants:tenants(id, name, slug)')
+          .eq('user_id', session.user.id);
+
+        setRoleAssignments(updatedRoles ?? []);
+
+        setProfileFormError(null);
+        // Opcional: Mostrar mensagem de sucesso
+        console.log('Novo usuário criado e roles atualizados');
+      } catch (error) {
+        console.error('Falha ao criar usuário', error);
+        setProfileFormError(`Falha ao criar usuário: ${error.message}`);
+      } finally {
+        setIsSavingProfile(false);
+      }
+    },
+    [isSuperAdmin, session]
+  );
   const handleOpenCreateProfile = useCallback(() => {
     if (!canCreateProfile) {
       setProfileFormError('Você não tem permissão para criar perfis neste tenant.');
@@ -420,6 +629,58 @@ export function App() {
       setProfileFormError(null);
     },
     [profiles, canEditProfile]
+  );
+
+  const handleOpenModuleManager = useCallback(() => {
+    if (!isSuperAdmin || !tenant?.id) return;
+    setModuleManagerTenant(tenant);
+    setModuleManagerError(null);
+    setIsModuleManagerOpen(true);
+  }, [isSuperAdmin, tenant]);
+
+  const handleOpenTenantConsolePreview = useCallback(() => {
+    if (!tenant) return;
+    if (typeof window === 'undefined') return;
+    const previewId = tenant.slug ?? tenant.id;
+    const url = new URL(window.location.href);
+    url.searchParams.set('tenantView', previewId);
+    url.searchParams.delete('module');
+    window.open(url.toString(), '_blank', 'noopener');
+  }, [tenant]);
+
+  const handleTenantConsoleModuleOpen = useCallback(
+    (moduleId) => {
+      setTenantConsoleModuleId(moduleId);
+      if (typeof window !== 'undefined') {
+        const url = new URL(window.location.href);
+        if (moduleId) {
+          url.searchParams.set('module', moduleId);
+        } else {
+          url.searchParams.delete('module');
+        }
+        window.history.replaceState(null, '', url.toString());
+      }
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (!isTenantConsoleMode) {
+      setTenantConsoleModuleId(null);
+      return;
+    }
+    if (!tenantConsoleModuleId && selectedTenantConsoleModule?.id) {
+      setTenantConsoleModuleId(selectedTenantConsoleModule.id);
+    }
+  }, [isTenantConsoleMode, tenantConsoleModuleId, selectedTenantConsoleModule?.id]);
+
+  const handleHeaderAction = useCallback(
+    (actionId) => {
+      if (actionId === 'launchModule') {
+        handleOpenModuleManager();
+      }
+    },
+    [handleOpenModuleManager]
   );
 
   const handleCloseProfileForm = useCallback(() => {
@@ -591,7 +852,52 @@ export function App() {
     return data;
   }
 
-  if (isSupabaseConfigured) {
+  const handleSaveModules = useCallback(
+    async ({ active, planned }) => {
+      if (!moduleManagerTenant) return;
+      const activeArray = Array.from(active ?? []);
+      const plannedArray = Array.from(planned ?? []);
+
+      setIsSavingModules(true);
+      setModuleManagerError(null);
+      const supabaseEnabled = isSupabaseConfigured && supabase;
+
+      try {
+        if (supabaseEnabled) {
+          const { error } = await supabase
+            .from('tenants')
+            .update({
+              active_modules: activeArray,
+              coming_soon: plannedArray,
+            })
+            .eq('id', moduleManagerTenant.id);
+          if (error) throw error;
+        }
+
+        setTenantCollection((prev) =>
+          prev.map((item) =>
+            item.id === moduleManagerTenant.id
+              ? normalizeTenantRecord({
+                  ...item,
+                  active_modules: activeArray,
+                  coming_soon: plannedArray,
+                })
+              : item
+          )
+        );
+        setIsModuleManagerOpen(false);
+        setModuleManagerTenant(null);
+      } catch (error) {
+        console.error('Falha ao salvar módulos', error);
+        setModuleManagerError('Não foi possível atualizar os módulos deste tenant.');
+      } finally {
+        setIsSavingModules(false);
+      }
+    },
+    [moduleManagerTenant, isSupabaseConfigured]
+  );
+
+  if (!isTenantConsoleMode && isSupabaseConfigured) {
     if (isAuthLoading) {
       return html`<div className="app-shell"><p>Conferindo sessão...</p></div>`;
     }
@@ -604,11 +910,69 @@ export function App() {
     }
   }
 
+  if (isTenantConsoleMode) {
+    let tenantConsoleModuleContent = null;
+    if (!selectedTenantConsoleModule) {
+      tenantConsoleModuleContent = html`<p className="tenant-console__empty">
+        Nenhum módulo disponível para este tenant.
+      </p>`;
+    } else if (selectedTenantConsoleModule.status !== 'active') {
+      tenantConsoleModuleContent = html`<p className="tenant-console__empty">
+        O módulo ${selectedTenantConsoleModule.name} ainda está em construção pela REVA.
+      </p>`;
+    } else if (selectedTenantConsoleModule.id === 'users') {
+      tenantConsoleModuleContent = html`
+        <${UserDirectoryPanel}
+          profiles=${filteredProfiles}
+          query=${profileQuery}
+          statusFilter=${profileStatusFilter}
+          onQueryChange=${handleProfileQueryChange}
+          onStatusChange=${handleProfileStatusChange}
+          isSyncing=${isLoading}
+          errorMessage=${loadError}
+          onCreate=${handleOpenCreateProfile}
+          onEdit=${handleOpenEditProfile}
+          canCreate=${canCreateProfile}
+          canEditProfile=${canEditProfile}
+        />
+      `;
+    } else {
+      tenantConsoleModuleContent = html`<p className="tenant-console__empty">
+        Integração do módulo ${selectedTenantConsoleModule.name} ainda está em desenvolvimento.
+      </p>`;
+    }
+
+    return html`
+      <div className="tenant-console-shell">
+        <${TenantConsoleView}
+          tenant=${tenant}
+          modules=${tenantModules}
+          selectedModuleId=${selectedTenantConsoleModule?.id}
+          onOpenModule=${handleTenantConsoleModuleOpen}
+          moduleContent=${tenantConsoleModuleContent}
+          onLogout=${session ? handleLogout : null}
+        />
+        ${isUserFormOpen &&
+        html`<${UserFormPanel}
+          tenants=${tenantOptionsForForm}
+          initialData=${editingProfile ?? { tenantId: lockedTenantId ?? tenant?.id }}
+          onSubmit=${handleProfileSubmit}
+          onCancel=${handleCloseProfileForm}
+          isSaving=${isSavingProfile}
+          error=${profileFormError}
+          lockedTenantId=${lockedTenantId}
+          canEditTenant=${canEditTenantField}
+          canEditRole=${isSuperAdmin}
+        />`}
+      </div>
+    `;
+  }
+
   return html`
     <div className="app-shell">
       ${isSupabaseConfigured &&
-      session &&
-      html`
+    session &&
+    html`
         <div className="auth-banner">
           <span>${session.user.email}</span>
           <button type="button" className="ghost-button" onClick=${handleLogout}>Sair</button>
@@ -620,7 +984,8 @@ export function App() {
         tenants=${tenantCollectionForUI.length ? tenantCollectionForUI : tenantCollection}
         selectedTenantId=${tenant?.id}
         onTenantChange=${handleTenantChange}
-        actions=${quickActions}
+        actions=${headerActions}
+        onAction=${handleHeaderAction}
       />
       <${ModuleWorkspaceNav}
         items=${workspaceItems}
@@ -637,7 +1002,19 @@ export function App() {
                 <p className="panel-eyebrow">Mapeamento</p>
                 <h2 className="panel-title">Módulos por tenant</h2>
               </div>
-              <${ModuleFilters} activeFilter=${moduleFilter} onChange=${handleFilterChange} />
+              <div className="panel-actions">
+                <${ModuleFilters} activeFilter=${moduleFilter} onChange=${handleFilterChange} />
+                ${isSuperAdmin &&
+                html`
+                  <button
+                    type="button"
+                    className="ghost-button"
+                    onClick=${() => handleOpenTenantConsolePreview()}
+                  >
+                    Ver como tenant
+                  </button>
+                `}
+              </div>
             </div>
             ${isLoading &&
       html`<p className="data-feedback">Sincronizando com Supabase...</p>`}
@@ -679,6 +1056,24 @@ export function App() {
           canEditRole=${isSuperAdmin}
         />`}
       `}
+      ${isSuperAdmin &&
+      isModuleManagerOpen &&
+      moduleManagerTenant &&
+      html`<${TenantModuleManager}
+        tenant=${moduleManagerTenant}
+        moduleCatalog=${moduleCatalog}
+        initialActive=${moduleManagerTenant.activeModules ?? moduleManagerTenant.active_modules ?? []}
+        initialPlanned=${moduleManagerTenant.comingSoon ?? moduleManagerTenant.coming_soon ?? []}
+        onClose=${() => {
+          if (!isSavingModules) {
+            setIsModuleManagerOpen(false);
+            setModuleManagerTenant(null);
+          }
+        }}
+        onSave=${handleSaveModules}
+        isSaving=${isSavingModules}
+        error=${moduleManagerError}
+      />`}
     </div>
   `;
 }
@@ -761,7 +1156,7 @@ function normalizeProfileRecord(record, tenants = []) {
       id: item.id ?? generateLocalId(),
       area: item.area ?? '',
       specialty: item.specialty ?? '',
-      subSpecialty: item.sub_specialty ?? item.subSpecialty ?? '',
+      rqeNumber: item.rqe_number ?? item.rqeNumber ?? item.sub_specialty ?? item.subSpecialty ?? '',
       notes: item.notes ?? '',
     })),
     roles: rolesSource.map((role) => ({
@@ -791,7 +1186,25 @@ function normalizeProfileRecord(record, tenants = []) {
 
 function resolveTenantMeta(tenants, identifier) {
   if (!identifier) return null;
-  return tenants.find((tenant) => tenant.id === identifier || tenant.slug === identifier) ?? null;
+  return (
+    tenants.find((tenant) => {
+      const slug = tenant.slug ?? tenant.id;
+      return tenant.id === identifier || slug === identifier;
+    }) ?? null
+  );
+}
+
+function resolveTenantIdFromCollection(identifier, collection) {
+  return resolveTenantMeta(collection, identifier)?.id ?? null;
+}
+
+function normalizeTenantRecord(record) {
+  if (!record) return record;
+  return {
+    ...record,
+    activeModules: record.activeModules ?? record.active_modules ?? [],
+    comingSoon: record.comingSoon ?? record.coming_soon ?? [],
+  };
 }
 
 function generateLocalId() {
@@ -868,24 +1281,60 @@ async function uploadAvatarToStorage(file, tenantId, profileId, currentUser) {
   if (!supabase) throw new Error('Supabase não configurado para upload de fotos.');
   if (!currentUser?.id) throw new Error('Faça login para enviar imagens.');
 
-  const extension = extractFileExtension(file.name) || 'jpg';
-  const tenantFolder = tenantId ?? 'global';
-  const fileName = `${tenantFolder}/${profileId}/${generateFileName()}.${extension}`;
+  try {
+    // Verificar se o perfil existe e obter informações
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('user_id, tenant_id')
+      .eq('id', profileId)
+      .single();
 
-  const { error } = await supabase.storage
-    .from(AVATAR_BUCKET)
-    .upload(fileName, file, {
-      upsert: true,
-      cacheControl: '3600',
-    });
+    if (profileError) throw new Error('Perfil não encontrado.');
 
-  if (error) {
-    console.error('Erro ao fazer upload:', error);
+    // Obter role do usuário atual
+    const { data: userRoles, error: rolesError } = await supabase
+      .from('user_roles')
+      .select('role')
+      .eq('user_id', currentUser.id);
+
+    if (rolesError) throw new Error('Não foi possível verificar permissões.');
+
+    const userRole = userRoles?.[0]?.role;
+    const isSuperAdmin = userRole === 'super_admin';
+    const isTenantAdmin = userRole === 'tenant_admin' && profile.tenant_id === tenantId;
+    const isOwnProfile = userRole === 'associado' && profile.user_id === currentUser.id;
+
+    // Verificar permissão
+    if (!isSuperAdmin && !isTenantAdmin && !isOwnProfile) {
+      throw new Error('Você não tem permissão para fazer upload de foto para este perfil.');
+    }
+
+    console.log(`Upload autorizado para ${userRole} em perfil ${profileId}`);
+
+    // Fazer upload
+    const extension = extractFileExtension(file.name) || 'jpg';
+    const tenantFolder = tenantId ?? 'global';
+    const fileName = `${tenantFolder}/${profileId}/${generateFileName()}.${extension}`;
+
+    const { error } = await supabase.storage
+      .from(AVATAR_BUCKET)
+      .upload(fileName, file, {
+        upsert: true,
+        cacheControl: '3600',
+      });
+
+    if (error) {
+      console.error('Erro ao fazer upload:', error);
+      throw error;
+    }
+
+    const { data } = supabase.storage.from(AVATAR_BUCKET).getPublicUrl(fileName);
+    console.log('Upload concluído com sucesso:', data.publicUrl);
+    return data.publicUrl;
+  } catch (error) {
+    console.error('Erro em uploadAvatarToStorage:', error);
     throw error;
   }
-
-  const { data } = supabase.storage.from(AVATAR_BUCKET).getPublicUrl(fileName);
-  return data.publicUrl;
 }
 function extractFileExtension(name = '') {
   const parts = name.split('.');
@@ -948,7 +1397,7 @@ function mapSpecialtyPayload(item, profileId) {
     profile_id: profileId,
     area: item.area,
     specialty: item.specialty,
-    sub_specialty: item.subSpecialty,
+    sub_specialty: item.rqeNumber ?? '',
     notes: item.notes,
   };
 }
@@ -972,7 +1421,10 @@ function mapTitlePayload(item, profileId) {
 function mapPracticePayload(item, profileId) {
   return {
     profile_id: profileId,
-    practice: item.practice,
+    practice:
+      item.practice === 'other'
+        ? (item.customPractice ?? '').trim()
+        : item.practice,
   };
 }
 

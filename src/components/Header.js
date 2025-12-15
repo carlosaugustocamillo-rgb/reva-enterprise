@@ -2,7 +2,15 @@ import { html } from '../lib/html.js';
 import { TenantSwitcher } from './TenantSwitcher.js';
 import { QuickActions } from './QuickActions.js';
 
-export function Header({ title, subtitle, tenants, selectedTenantId, onTenantChange, actions }) {
+export function Header({
+  title,
+  subtitle,
+  tenants,
+  selectedTenantId,
+  onTenantChange,
+  actions,
+  onAction,
+}) {
   return html`
     <header className="app-header">
       <div className="app-header__copy">
@@ -16,7 +24,7 @@ export function Header({ title, subtitle, tenants, selectedTenantId, onTenantCha
           selectedId=${selectedTenantId}
           onChange=${onTenantChange}
         />
-        <${QuickActions} actions=${actions} />
+        <${QuickActions} actions=${actions} onAction=${onAction} />
       </div>
     </header>
   `;

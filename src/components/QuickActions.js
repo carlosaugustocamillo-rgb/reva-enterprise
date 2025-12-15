@@ -5,7 +5,7 @@ const variantClass = {
   ghost: 'quick-action--ghost',
 };
 
-export function QuickActions({ actions = [] }) {
+export function QuickActions({ actions = [], onAction }) {
   if (!actions.length) return null;
 
   return html`
@@ -20,6 +20,8 @@ export function QuickActions({ actions = [] }) {
             type="button"
             className=${classes}
             data-action=${action.id}
+            disabled=${action.disabled}
+            onClick=${() => onAction?.(action.id)}
           >
             ${action.label}
           </button>
