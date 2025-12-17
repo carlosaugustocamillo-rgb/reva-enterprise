@@ -12,8 +12,9 @@ export function InsightPanel({ cards = [] }) {
     <section className="insight-panel">
       ${cards.map((card, index) => {
         const classes = ['insight-card', toneClass[card.tone] ?? ''].filter(Boolean).join(' ');
+        const keyValue = card.id ?? `insight-${index}`;
         return html`
-          <article key=${card.id ?? `insight-${index}`} className=${classes}>
+          <article key=${keyValue} className=${classes}>
             <p className="insight-card__label">${card.label}</p>
             <strong className="insight-card__value">${card.value}</strong>
             <span className="insight-card__variation">${card.variation}</span>

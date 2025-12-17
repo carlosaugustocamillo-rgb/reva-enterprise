@@ -47,11 +47,12 @@ export function TenantConsoleView({
       ${visibleModules.length
         ? html`
             <div className="tenant-console__tabs">
-              ${visibleModules.map((module) => {
+              ${visibleModules.map((module, index) => {
                 const isSelected = selectedModule?.id === module.id;
+                const tabKey = module.id ?? module.slug ?? `${module.name}-${index}`;
                 return html`
                   <button
-                    key=${module.id ?? module.slug ?? module.name}
+                    key=${tabKey}
                     type="button"
                     className=${[
                       'tenant-console__tab',
@@ -86,8 +87,12 @@ export function TenantConsoleView({
                     ${selectedModule.focus?.length
                       ? html`
                           <div className="tenant-console__tags">
-                            ${selectedModule.focus.map(
-                              (tag) => html`<span key=${`${selectedModule.id}-${tag}`}>${tag}</span>`
+                            ${selectedModule.focus.map((tag, index) =>
+                              html`<span
+                                key=${`${selectedModule.id}-${tag}-${index}`}
+                              >
+                                ${tag}
+                              </span>`
                             )}
                           </div>
                         `

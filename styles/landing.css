@@ -1,0 +1,355 @@
+/* ============================================================================
+   Landing Page Styles
+   ============================================================================ */
+
+.landing-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: #333;
+}
+
+.landing-header {
+  background: rgba(255, 255, 255, 0.95);
+  padding: 2rem 1rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  text-align: center;
+}
+
+.landing-header__content {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.landing-title {
+  font-size: 2.5rem;
+  font-weight: 600;
+  margin: 0 0 0.5rem 0;
+  color: #667eea;
+}
+
+.landing-subtitle {
+  font-size: 1.1rem;
+  color: #666;
+  margin: 0;
+}
+
+.landing-main {
+  flex: 1;
+  max-width: 1200px;
+  margin: 0 auto;
+  width: 100%;
+  padding: 3rem 1rem;
+}
+
+.landing-hero {
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 12px;
+  padding: 3rem 2rem;
+  margin-bottom: 3rem;
+  text-align: center;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+}
+
+.landing-hero__content h2 {
+  font-size: 2rem;
+  margin: 0 0 1rem 0;
+  color: #333;
+}
+
+.landing-hero__content p {
+  font-size: 1.1rem;
+  color: #666;
+  margin: 0 0 2rem 0;
+  line-height: 1.6;
+}
+
+.landing-cta {
+  display: inline-block;
+  padding: 0.75rem 2rem;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  text-decoration: none;
+  border-radius: 8px;
+  font-weight: 600;
+  transition: transform 0.2s, box-shadow 0.2s;
+  border: none;
+  cursor: pointer;
+  font-size: 1rem;
+}
+
+.landing-cta:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 16px rgba(102, 126, 234, 0.4);
+}
+
+.landing-cta--large {
+  padding: 1rem 3rem;
+  font-size: 1.1rem;
+}
+
+.landing-section-title {
+  font-size: 2rem;
+  margin: 0 0 2rem 0;
+  color: white;
+  text-align: center;
+}
+
+.landing-features {
+  margin-bottom: 3rem;
+}
+
+.landing-features__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 2rem;
+  margin-bottom: 3rem;
+}
+
+.landing-feature-card {
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 12px;
+  padding: 2rem;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.landing-feature-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+}
+
+.landing-feature-card h3 {
+  font-size: 1.3rem;
+  margin: 0 0 1rem 0;
+  color: #667eea;
+}
+
+.landing-feature-card p {
+  margin: 0;
+  color: #666;
+  line-height: 1.6;
+}
+
+.landing-roles {
+  margin-bottom: 3rem;
+}
+
+.landing-roles__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 2rem;
+}
+
+.landing-role-card {
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 12px;
+  padding: 2rem;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+  border-left: 4px solid #667eea;
+}
+
+.landing-role-card h3 {
+  font-size: 1.2rem;
+  margin: 0 0 1rem 0;
+  color: #333;
+}
+
+.landing-role-card p {
+  margin: 0;
+  color: #666;
+  line-height: 1.6;
+}
+
+.landing-cta-section {
+  background: rgba(255, 255, 255, 0.95);
+  border-radius: 12px;
+  padding: 3rem 2rem;
+  text-align: center;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+  margin-bottom: 3rem;
+}
+
+.landing-cta-section h2 {
+  font-size: 1.8rem;
+  margin: 0 0 1rem 0;
+  color: #333;
+}
+
+.landing-cta-section p {
+  font-size: 1.1rem;
+  color: #666;
+  margin: 0 0 2rem 0;
+}
+
+.landing-footer {
+  background: rgba(0, 0, 0, 0.2);
+  color: white;
+  text-align: center;
+  padding: 2rem 1rem;
+  margin-top: auto;
+}
+
+.landing-footer p {
+  margin: 0;
+}
+
+/* ============================================================================
+   Error Page Styles
+   ============================================================================ */
+
+.error-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  padding: 1rem;
+}
+
+.error-page__content {
+  background: white;
+  border-radius: 12px;
+  padding: 3rem 2rem;
+  text-align: center;
+  max-width: 500px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.error-page__icon {
+  font-size: 4rem;
+  margin-bottom: 1rem;
+  line-height: 1;
+}
+
+.error-page__title {
+  font-size: 2rem;
+  margin: 0 0 1rem 0;
+  color: #333;
+}
+
+.error-page__description {
+  font-size: 1rem;
+  color: #666;
+  margin: 0 0 2rem 0;
+  line-height: 1.6;
+}
+
+.error-page__actions {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.error-page__link {
+  display: inline-block;
+  padding: 0.75rem 1.5rem;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  text-decoration: none;
+  border-radius: 8px;
+  font-weight: 600;
+  transition: transform 0.2s, box-shadow 0.2s;
+  border: none;
+  cursor: pointer;
+  font-size: 1rem;
+}
+
+.error-page__link:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 16px rgba(102, 126, 234, 0.4);
+}
+
+.error-page__link--secondary {
+  background: #f0f0f0;
+  color: #333;
+}
+
+.error-page__link--secondary:hover {
+  background: #e0e0e0;
+}
+
+/* ============================================================================
+   Loading State
+   ============================================================================ */
+
+.app-shell--loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  font-size: 1.2rem;
+}
+
+/* ============================================================================
+   Content Placeholder
+   ============================================================================ */
+
+.content-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+  padding: 2rem;
+  text-align: center;
+}
+
+.content-placeholder h1 {
+  font-size: 2rem;
+  margin: 0 0 1rem 0;
+  color: #333;
+}
+
+.content-placeholder p {
+  font-size: 1.1rem;
+  color: #666;
+  margin: 0 0 2rem 0;
+}
+
+/* ============================================================================
+   Responsive Design
+   ============================================================================ */
+
+@media (max-width: 768px) {
+  .landing-title {
+    font-size: 2rem;
+  }
+
+  .landing-hero {
+    padding: 2rem 1rem;
+  }
+
+  .landing-hero__content h2 {
+    font-size: 1.5rem;
+  }
+
+  .landing-section-title {
+    font-size: 1.5rem;
+  }
+
+  .landing-features__grid,
+  .landing-roles__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .landing-cta-section {
+    padding: 2rem 1rem;
+  }
+
+  .error-page__content {
+    padding: 2rem 1rem;
+  }
+
+  .error-page__icon {
+    font-size: 3rem;
+  }
+
+  .error-page__title {
+    font-size: 1.5rem;
+  }
+}
